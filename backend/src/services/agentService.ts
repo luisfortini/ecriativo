@@ -3,6 +3,8 @@ import type { ResponseTextConfig } from "openai/resources/responses/responses";
 import { config } from "../config.js";
 import { db } from "../db/connection.js";
 import type { AgentExecutionLog, AgentKey, AgentRecord, AgentVersionRecord } from "../types.js";
+import { recordAiUsage, type AiOperationType } from "./aiCostService.js";
+import { sendAgentErrorAsync } from "./whatsappNotificationService.js";
 
 const client = config.openaiApiKey ? new OpenAI({ apiKey: config.openaiApiKey, timeout: config.openaiTimeoutMs }) : null;
 
@@ -130,11 +132,19 @@ export function compareAgentVersion(agentId: number, versionId: number) {
   };
 }
 
-export async function executeAgentByKey<T>(key: AgentKey, context: unknown, options?: { campaignId?: number | null; clientId?: number | null }) {
+export async function executeAgentByKey<T>(
+  key: AgentKey,
+  context: unknown,
+  options?: { campaignId?: number | null; clientId?: number | null; campaignPlanId?: number | null; queueId?: number | null; operationType?: AiOperationType }
+) {
   return executeAgent<T>(getActiveAgent(key), context, options);
 }
 
-export async function executeAgent<T>(agent: AgentRecord, context: unknown, options?: { campaignId?: number | null; clientId?: number | null }) {
+export async function executeAgent<T>(
+  agent: AgentRecord,
+  context: unknown,
+  options?: { campaignId?: number | null; clientId?: number | null; campaignPlanId?: number | null; queueId?: number | null; operationType?: AiOperationType }
+) {
   const schema = parseSchema(agent.output_schema_json);
   const input = buildAgentInput(agent, context);
   const started = Date.now();
@@ -152,6 +162,7 @@ export async function executeAgent<T>(agent: AgentRecord, context: unknown, opti
     } else {
       const response = await callOpenAI(agent, input.prompt, schema, false);
       outputRaw = response.output_text;
+      let usage = response.usage as { input_tokens?: number; output_tokens?: number } | undefined;
       try {
         parsed = JSON.parse(outputRaw) as T;
       } catch (parseError) {
@@ -159,8 +170,8 @@ export async function executeAgent<T>(agent: AgentRecord, context: unknown, opti
         const retry = await callOpenAI(agent, input.prompt, schema, true);
         outputRaw = retry.output_text;
         parsed = JSON.parse(outputRaw) as T;
+        usage = retry.usage as { input_tokens?: number; output_tokens?: number } | undefined;
       }
-      const usage = response.usage as { input_tokens?: number; output_tokens?: number } | undefined;
       tokensInput = usage?.input_tokens ?? null;
       tokensOutput = usage?.output_tokens ?? null;
     }
@@ -174,10 +185,15 @@ export async function executeAgent<T>(agent: AgentRecord, context: unknown, opti
     errorMessage = error instanceof Error ? error.message : "Erro ao executar agente.";
     throw error;
   } finally {
-    saveExecutionLog({
+    const saved = saveExecutionLog({
       agentId: agent.id,
+      agentKey: agent.key,
+      model: agent.model,
       campaignId: options?.campaignId ?? null,
       clientId: options?.clientId ?? null,
+      campaignPlanId: options?.campaignPlanId ?? null,
+      queueId: options?.queueId ?? null,
+      operationType: options?.operationType ?? operationTypeForAgent(agent.key),
       inputJson: JSON.stringify(input, null, 2),
       outputRaw,
       outputParsedJson: parsed ? JSON.stringify(parsed, null, 2) : null,
@@ -185,11 +201,22 @@ export async function executeAgent<T>(agent: AgentRecord, context: unknown, opti
       errorMessage,
       tokensInput,
       tokensOutput,
+      contextChars: input.context_chars,
       latencyMs: Date.now() - started
     });
+    (input as typeof input & { execution_log_id?: number; ai_usage_log_id?: number }).execution_log_id = saved.executionLogId;
+    (input as typeof input & { execution_log_id?: number; ai_usage_log_id?: number }).ai_usage_log_id = saved.aiUsageLogId;
   }
 
-  return { agent, input, outputRaw, parsed: parsed as T, schema_errors: [] as string[] };
+  return {
+    agent,
+    input,
+    outputRaw,
+    parsed: parsed as T,
+    schema_errors: [] as string[],
+    execution_log_id: (input as typeof input & { execution_log_id?: number }).execution_log_id,
+    ai_usage_log_id: (input as typeof input & { ai_usage_log_id?: number }).ai_usage_log_id
+  };
 }
 
 export async function testAgent(agentId: number, context: unknown, clientId?: number | null) {
@@ -234,8 +261,13 @@ function createVersion(agentId: number, changeNotes: string) {
 
 function saveExecutionLog(input: {
   agentId: number;
+  agentKey: string;
+  model: string;
   campaignId: number | null;
   clientId: number | null;
+  campaignPlanId: number | null;
+  queueId: number | null;
+  operationType: AiOperationType;
   inputJson: string;
   outputRaw: string | null;
   outputParsedJson: string | null;
@@ -243,13 +275,17 @@ function saveExecutionLog(input: {
   errorMessage: string | null;
   tokensInput: number | null;
   tokensOutput: number | null;
+  contextChars: number;
   latencyMs: number;
 }) {
-  db.prepare(
+  const totalTokens = (input.tokensInput ?? 0) + (input.tokensOutput ?? 0);
+  const contextWarning = input.tokensInput && input.tokensInput > 10000 ? "contexto excessivo" : null;
+  const result = db.prepare(
     `INSERT INTO agent_execution_logs (
       agent_id, campaign_id, client_id, input_json, output_raw, output_parsed_json,
-      status, error_message, tokens_input, tokens_output, latency_ms
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      status, error_message, tokens_input, tokens_output, total_tokens, context_chars, tamanho_contexto_caracteres,
+      agent_key, context_warning, latency_ms
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     input.agentId,
     input.campaignId,
@@ -261,20 +297,110 @@ function saveExecutionLog(input: {
     input.errorMessage,
     input.tokensInput,
     input.tokensOutput,
+    totalTokens || null,
+    input.contextChars,
+    input.contextChars,
+    db.prepare("SELECT key FROM agents WHERE id = ?").pluck().get(input.agentId) ?? null,
+    contextWarning,
     input.latencyMs
   );
+  const executionLogId = Number(result.lastInsertRowid);
+    const aiUsageLogId = recordAiUsage({
+    clientId: input.clientId,
+    campaignId: input.campaignId,
+    campaignPlanId: input.campaignPlanId,
+    queueId: input.queueId,
+    agentId: input.agentId,
+    agentKey: input.agentKey,
+    model: input.model,
+    operationType: input.operationType,
+    status: input.status,
+    inputTokens: input.tokensInput,
+    outputTokens: input.tokensOutput,
+    contextCharacters: input.contextChars,
+    latencyMs: input.latencyMs,
+    errorMessage: input.errorMessage,
+    sourceLogId: executionLogId,
+    metadata: { context_warning: contextWarning }
+  });
+  if (input.status === "error") sendAgentErrorAsync(executionLogId);
+  return { executionLogId, aiUsageLogId };
+}
+
+function operationTypeForAgent(key: string): AiOperationType {
+  if (key === "strategist_agent") return "estrategista";
+  if (key === "creative_agent") return "criativo";
+  if (key === "brand_analyzer_agent") return "analise_marca";
+  return "agente";
 }
 
 function buildAgentInput(agent: AgentRecord, context: unknown) {
-  const contextJson = JSON.stringify(context, null, 2);
+  const compactContext = compactContextForPrompt(context);
+  const contextJson = JSON.stringify(compactContext);
   return {
     system_prompt: agent.system_prompt,
     prompt: agent.prompt_template
       .replaceAll("{{context_json}}", contextJson)
       .replaceAll("{{agent_key}}", agent.key)
       .replaceAll("{{agent_name}}", agent.name),
-    context
+    context: compactContext,
+    context_chars: contextJson.length
   };
+}
+
+export function compactContextForPrompt(context: unknown): unknown {
+  return compactValue(context, { key: "", depth: 0 });
+}
+
+function compactValue(value: unknown, meta: { key: string; depth: number }): unknown {
+  if (value === null || value === undefined || value === "") return undefined;
+  if (typeof value === "string") return truncatePromptString(value, limitForKey(meta.key));
+  if (typeof value === "number" || typeof value === "boolean") return value;
+  if (Array.isArray(value)) {
+    const maxItems = arrayLimitForKey(meta.key);
+    return value
+      .slice(0, maxItems)
+      .map((item) => compactValue(item, { key: meta.key, depth: meta.depth + 1 }))
+      .filter((item) => item !== undefined);
+  }
+  if (typeof value !== "object") return undefined;
+  if (meta.depth > 6) return undefined;
+
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([key]) => !["brand_analyses", "campaigns", "logs", "raw_ai_output_json", "extracted_text", "extracted_images_json"].includes(key))
+      .map(([key, item]) => [key, compactValue(item, { key, depth: meta.depth + 1 })] as const)
+      .filter(([, item]) => item !== undefined && !(Array.isArray(item) && item.length === 0) && !isEmptyObject(item))
+  );
+}
+
+function limitForKey(key: string) {
+  if (key === "brand_memory_summary" || key === "resumo_memoria_marca" || key === "aprendizados_recentes") return 1500;
+  if (key === "briefing_criativo") return 2500;
+  if (key === "estrategia_objetiva") return 4000;
+  if (key === "resumo") return 500;
+  if (key.includes("prompt")) return 1800;
+  return 900;
+}
+
+function arrayLimitForKey(key: string) {
+  if (key.includes("campanhas")) return 3;
+  if (key.includes("aprovadas") || key.includes("reprovadas")) return 5;
+  if (key === "paleta" || key === "elementos_visuais" || key === "evitar") return 8;
+  return 10;
+}
+
+function truncatePromptString(value: string, max: number) {
+  const clean = value.replace(/\s+/g, " ").trim();
+  return clean.length > max ? `${clean.slice(0, max - 1).trim()}...` : clean;
+}
+
+function isPlainObject(value: unknown) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function isEmptyObject(value: unknown) {
+  return isPlainObject(value) && Object.keys(value as Record<string, unknown>).length === 0;
 }
 
 function jsonFormat(name: string, schema: { [key: string]: unknown }): ResponseTextConfig {
@@ -328,6 +454,8 @@ function localAgentResponse<T>(key: string, context: unknown) {
   const data = context as {
     briefing_normalizado?: Record<string, unknown>;
     estrategia?: Record<string, unknown>;
+    estrategia_objetiva?: Record<string, unknown>;
+    client_prompt_context?: Record<string, unknown>;
     offer?: string;
     target_audience?: string;
     objective?: string;
@@ -370,11 +498,12 @@ function localAgentResponse<T>(key: string, context: unknown) {
   }
 
   if (key === "creative_agent") {
-    const briefing = data.briefing_normalizado ?? data;
-    const strategy = data.estrategia ?? {};
+    const briefing = (data.briefing_normalizado ?? data.client_prompt_context ?? data) as Record<string, unknown>;
+    const strategy = data.estrategia_objetiva ?? data.estrategia ?? {};
+    const creativeBrief = formatCreativeBriefing(strategy.briefing_criativo);
     return {
-      prompt_imagem: `${String(strategy.briefing_criativo ?? "Criativo publicitario")}. Direcao visual alinhada a ${String(briefing.brand_voice ?? "marca")}, paleta ${String(briefing.color_palette ?? "institucional")}, assets ${(briefing.assets as Array<{ type: string; file_url: string }> | undefined)?.map((asset) => `${asset.type}: ${asset.file_url}`).join(", ") || "nenhum"}.`,
-      negative_prompt: `baixa resolucao, texto distorcido, logos inventados, ${(briefing as Record<string, unknown>).forbidden_colors ?? ""}, ${(briefing as Record<string, unknown>).forbidden_styles ?? ""}`,
+      prompt_imagem: `${creativeBrief || "Criativo publicitario"}. Direcao visual alinhada a ${String(briefing.tom_de_voz ?? briefing.brand_voice ?? "marca")}, paleta ${String(briefing.paleta_de_cores ?? briefing.color_palette ?? "institucional")}.`,
+      negative_prompt: `baixa resolucao, texto distorcido, logos inventados, ${(briefing as Record<string, unknown>).cores_proibidas ?? ""}, ${(briefing as Record<string, unknown>).estilo_visual_proibido ?? ""}`,
       direcao_visual_resumida: `Estilo visual baseado no briefing criativo e na memoria do cliente.`
     } as T;
   }
@@ -386,8 +515,34 @@ function localAgentResponse<T>(key: string, context: unknown) {
     headline: `${String(data.offer ?? "Oferta")} para ${String(data.client?.segment ?? data.client?.name ?? "o cliente")}`,
     texto_principal: `Campanha alinhada a memoria criativa do cliente e ao briefing atual.`,
     cta: (String(data.preferred_ctas || "Conheca a oferta").split("\n")[0] || "Conheca a oferta").replace(/^- /, ""),
-    briefing_criativo: `Anuncio ${String(data.format ?? "1:1")} com paleta ${String(data.color_palette ?? "da marca")} e estilos aprovados ${String(data.approved_styles ?? "nao informados")}.`
+    briefing_criativo: {
+      conceito: `Anuncio ${String(data.format ?? "1:1")} para ${String(data.offer ?? "a oferta")}.`,
+      emocao: "Confianca e clareza.",
+      composicao: "Hierarquia visual simples com foco na promessa principal.",
+      paleta: String(data.color_palette ?? data.client_prompt_context?.paleta_de_cores ?? "da marca").split(",").map((item) => item.trim()).filter(Boolean).slice(0, 5),
+      elementos_visuais: ["produto ou servico em destaque", "elementos da identidade visual"],
+      hierarquia: "Headline, prova visual, CTA.",
+      evitar: String(data.forbidden_styles ?? data.client_prompt_context?.estilo_visual_proibido ?? "poluicao visual").split(",").map((item) => item.trim()).filter(Boolean).slice(0, 5)
+    }
   } as T;
+}
+
+function formatCreativeBriefing(value: unknown) {
+  if (!value) return "";
+  if (typeof value === "string") return value;
+  if (typeof value !== "object" || Array.isArray(value)) return String(value);
+  const item = value as Record<string, unknown>;
+  return [
+    item.conceito,
+    item.emocao ? `Emocao: ${String(item.emocao)}` : "",
+    item.composicao ? `Composicao: ${String(item.composicao)}` : "",
+    Array.isArray(item.paleta) && item.paleta.length ? `Paleta: ${item.paleta.join(", ")}` : "",
+    Array.isArray(item.elementos_visuais) && item.elementos_visuais.length ? `Elementos: ${item.elementos_visuais.join(", ")}` : "",
+    item.hierarquia ? `Hierarquia: ${String(item.hierarquia)}` : "",
+    Array.isArray(item.evitar) && item.evitar.length ? `Evitar: ${item.evitar.join(", ")}` : ""
+  ]
+    .filter(Boolean)
+    .join(". ");
 }
 
 function inferFromText(text: string, fallback: string) {

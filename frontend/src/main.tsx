@@ -11,6 +11,8 @@ import { CampaignPlanDetail } from "./pages/CampaignPlanDetail";
 import { CampaignPlanner } from "./pages/CampaignPlanner";
 import { CampaignPlannerLogs } from "./pages/CampaignPlannerLogs";
 import { CampaignQueue } from "./pages/CampaignQueue";
+import { AiCosts } from "./pages/AiCosts";
+import { WhatsappSettings } from "./pages/WhatsappSettings";
 import { NewCampaignPlan } from "./pages/NewCampaignPlan";
 import { Dashboard } from "./pages/Dashboard";
 import { NewCampaign } from "./pages/NewCampaign";
@@ -29,6 +31,8 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
           <Route path="/planejador/:id" element={<CampaignPlanDetail />} />
           <Route path="/fila-geracao" element={<CampaignQueue />} />
           <Route path="/execucoes-planejador" element={<CampaignPlannerLogs />} />
+          <Route path="/custos-ia" element={<AiCosts />} />
+          <Route path="/whatsapp" element={<WhatsappSettings />} />
           <Route path="/clientes/:id" element={<ClientProfilePage />} />
           <Route path="/nova-campanha" element={<NewCampaign />} />
           <Route path="/campanhas/:id" element={<CampaignResult />} />

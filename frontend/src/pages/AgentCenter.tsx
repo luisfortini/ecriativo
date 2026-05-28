@@ -385,17 +385,30 @@ function VersionPanel({ selected, compare, onRestore, onCompare }: { selected: A
 function LogsPanel({ logs }: { logs: AgentExecutionLog[] }) {
   return (
     <div className="space-y-3">
-      {logs.map((log) => (
-        <details key={log.id} className="rounded-md border border-slate-200 p-4">
+      {logs.map((log) => {
+        const excessive = (log.tokens_input ?? 0) > 10000 || log.context_warning === "contexto excessivo";
+        const total = log.total_tokens ?? ((log.tokens_input ?? 0) + (log.tokens_output ?? 0));
+        return (
+        <details key={log.id} className={`rounded-md border p-4 ${excessive ? "border-amber-300 bg-amber-50" : "border-slate-200"}`}>
           <summary className="cursor-pointer text-sm font-semibold text-ink">
             {log.status} · {log.latency_ms ?? 0}ms · {new Date(log.created_at).toLocaleString("pt-BR")}
+            {excessive && <span className="ml-2 rounded bg-amber-200 px-2 py-1 text-xs text-amber-900">contexto excessivo</span>}
           </summary>
+          <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-600">
+            <span>input: {log.tokens_input ?? "-"}</span>
+            <span>output: {log.tokens_output ?? "-"}</span>
+            <span>total: {total || "-"}</span>
+            <span>contexto: {log.context_chars ?? log.tamanho_contexto_caracteres ?? "-"} chars</span>
+            {log.campaign_id && <span>campanha: {log.campaign_id}</span>}
+            {log.client_id && <span>cliente: {log.client_id}</span>}
+          </div>
           <div className="mt-3 grid gap-3 xl:grid-cols-2">
             <Result title="Input" value={log.input_json} />
             <Result title="Output" value={log.output_parsed_json || log.output_raw || log.error_message || ""} />
           </div>
         </details>
-      ))}
+        );
+      })}
     </div>
   );
 }

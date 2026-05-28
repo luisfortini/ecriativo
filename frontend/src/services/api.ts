@@ -2,6 +2,8 @@ import type {
   Agent,
   AgentExecutionLog,
   AgentTestResult,
+  AiCostDashboard,
+  AiModelPrice,
   CampaignDetail,
   CampaignGenerationLog,
   CampaignPlan,
@@ -192,6 +194,86 @@ export function reprocessQueueItem(id: number) {
   return request<CampaignQueueItem>(`/campaign-generation-queue/${id}/reprocess`, { method: "POST" });
 }
 
+export function notifyQueueError(id: number, error?: string) {
+  return request<Record<string, unknown>>(`/queue/${id}/notify-error`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ error })
+  });
+}
+
 export function getCampaignGenerationLogs(planId?: number) {
   return request<CampaignGenerationLog[]>(`/campaign-generation-logs${planId ? `?plan_id=${planId}` : ""}`);
+}
+
+export function getAiCosts(query = "") {
+  return request<AiCostDashboard>(`/ai-costs${query ? `?${query}` : ""}`);
+}
+
+export function getAiUsageDetail(id: number) {
+  return request<Record<string, unknown>>(`/ai-costs/usage/${id}`);
+}
+
+export function getAiModelPrices() {
+  return request<AiModelPrice[]>("/ai-costs/model-prices");
+}
+
+export function saveAiModelPrice(payload: Record<string, unknown>) {
+  return request<AiModelPrice[]>("/ai-costs/model-prices", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function getAiCostSettings() {
+  return request<Record<string, string>>("/ai-costs/settings");
+}
+
+export function saveAiCostSettings(payload: Record<string, string>) {
+  return request<Record<string, string>>("/ai-costs/settings", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function getWhatsappSettings() {
+  return request<Record<string, unknown>>("/whatsapp/settings");
+}
+
+export function saveWhatsappSettings(payload: Record<string, unknown>) {
+  return request<Record<string, unknown>>("/whatsapp/settings", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function testWhatsappConnection() {
+  return request<Record<string, unknown>>("/whatsapp/test-connection", { method: "POST" });
+}
+
+export function sendWhatsappTest(payload: Record<string, unknown>) {
+  return request<Record<string, unknown>>("/whatsapp/send-test", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function getClientWhatsappSettings(id: number) {
+  return request<Record<string, unknown>>(`/clients/${id}/whatsapp-settings`);
+}
+
+export function saveClientWhatsappSettings(id: number, payload: Record<string, unknown>) {
+  return request<Record<string, unknown>>(`/clients/${id}/whatsapp-settings`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function sendCampaignWhatsapp(id: number) {
+  return request<Record<string, unknown>>(`/campaigns/${id}/send-whatsapp`, { method: "POST" });
 }

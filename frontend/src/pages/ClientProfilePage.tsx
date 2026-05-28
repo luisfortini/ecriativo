@@ -4,7 +4,7 @@ import { Link, useParams } from "react-router-dom";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { LoadingBlock } from "../components/LoadingBlock";
 import { PageHeader } from "../components/PageHeader";
-import { analyzeClientBrand, applyBrandAnalysis, getClient, reanalyzeClientMaterials, updateClient, uploadClientAsset } from "../services/api";
+import { analyzeClientBrand, applyBrandAnalysis, getClient, getClientWhatsappSettings, reanalyzeClientMaterials, saveClientWhatsappSettings, updateClient, uploadClientAsset } from "../services/api";
 import type { ClientAssetType, ClientProfile } from "../types";
 
 const fields = {
@@ -25,11 +25,22 @@ const fields = {
   preferred_ctas: "",
   segment_policies: "",
   strategic_notes: "",
+  brand_memory_summary: "",
   site_url: "",
   instagram_url: ""
 };
 
-const tabs = ["Dados gerais", "Identidade visual", "Tom de voz", "Referencias", "Restricoes", "Analise de Marca", "Historico", "Aprendizados"];
+const tabs = ["Dados gerais", "Identidade visual", "Tom de voz", "Referencias", "Restricoes", "Analise de Marca", "Historico", "Aprendizados", "Notificações"];
+
+const notificationDefaults: Record<string, string | boolean> = {
+  responsible_phone: "",
+  whatsapp_group: "",
+  receive_generated_campaigns: false,
+  receive_errors: false,
+  receive_weekly_summary: false,
+  delivery_format: "image_caption",
+  active: true
+};
 
 const assetLabels: Record<ClientAssetType, string> = {
   logo_main: "Logo principal",
@@ -56,6 +67,7 @@ export function ClientProfilePage() {
   const [assetDescription, setAssetDescription] = useState("");
   const [assetFeedback, setAssetFeedback] = useState("");
   const [manualNotes, setManualNotes] = useState("");
+  const [notificationForm, setNotificationForm] = useState(notificationDefaults);
   const [analysisResult, setAnalysisResult] = useState<{
     analysis: { id: number };
     comparison: Array<{ field: string; label: string; current: string | null; suggestion: string }>;
@@ -72,6 +84,7 @@ export function ClientProfilePage() {
       .then((data) => {
         setClient(data);
         setForm(Object.fromEntries(Object.keys(fields).map((field) => [field, String(data[field as keyof ClientProfile] ?? "")])) as typeof fields);
+        getClientWhatsappSettings(data.id).then((settings) => setNotificationForm({ ...notificationDefaults, ...settings } as Record<string, string | boolean>)).catch(() => setNotificationForm(notificationDefaults));
       })
       .catch((err: Error) => setError(err.message))
       .finally(() => setLoading(false));
@@ -184,13 +197,26 @@ export function ClientProfilePage() {
     }
   }
 
+  async function saveNotifications() {
+    if (!client) return;
+    setSaving(true);
+    setError("");
+    try {
+      setNotificationForm({ ...notificationDefaults, ...(await saveClientWhatsappSettings(client.id, notificationForm)) } as Record<string, string | boolean>);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Nao foi possivel salvar notificacoes.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   const visibleFields = useMemo(() => {
     if (tab === "Dados gerais") return ["name", "segment", "business_description", "target_audience", "differentiators", "positioning", "site_url", "instagram_url"];
     if (tab === "Identidade visual") return ["color_palette", "forbidden_colors", "preferred_typography"];
     if (tab === "Tom de voz") return ["brand_voice", "preferred_ctas"];
     if (tab === "Referencias") return ["visual_references", "approved_styles"];
     if (tab === "Restricoes") return ["forbidden_styles", "communication_restrictions", "segment_policies"];
-    if (tab === "Aprendizados") return ["strategic_notes"];
+    if (tab === "Aprendizados") return ["brand_memory_summary", "strategic_notes"];
     return [];
   }, [tab]);
 
@@ -238,6 +264,8 @@ export function ClientProfilePage() {
           setAssetFile={setAssetFile}
           onUpload={sendAsset}
         />
+      ) : tab === "Notificações" ? (
+        <NotificationTab form={notificationForm} setForm={setNotificationForm} saving={saving} onSave={saveNotifications} />
       ) : tab === "Historico" ? (
         <div className="panel overflow-hidden">
           {client.campaigns.map((campaign) => (
@@ -313,6 +341,61 @@ function TextField(props: { field: keyof typeof fields; value: string; onChange:
         <input className="field" value={props.value} onChange={(event) => props.onChange((current) => ({ ...current, [props.field]: event.target.value }))} />
       )}
     </div>
+  );
+}
+
+function NotificationTab(props: {
+  form: Record<string, string | boolean>;
+  setForm: React.Dispatch<React.SetStateAction<Record<string, string | boolean>>>;
+  saving: boolean;
+  onSave: () => void;
+}) {
+  return (
+    <section className="panel max-w-3xl p-5">
+      <h2 className="mb-4 font-bold text-ink">Notificações do cliente</h2>
+      <div className="grid gap-4 md:grid-cols-2">
+        <div>
+          <label className="label">Telefone do responsável</label>
+          <input className="field" value={String(props.form.responsible_phone || "")} onChange={(event) => props.setForm((current) => ({ ...current, responsible_phone: event.target.value }))} />
+        </div>
+        <div>
+          <label className="label">Grupo de WhatsApp opcional</label>
+          <input className="field" value={String(props.form.whatsapp_group || "")} onChange={(event) => props.setForm((current) => ({ ...current, whatsapp_group: event.target.value }))} />
+        </div>
+        <div>
+          <label className="label">Formato de envio</label>
+          <select className="field" value={String(props.form.delivery_format)} onChange={(event) => props.setForm((current) => ({ ...current, delivery_format: event.target.value }))}>
+            <option value="image_caption">imagem + legenda</option>
+            <option value="link_only">somente link</option>
+            <option value="internal_alert">somente alerta interno</option>
+          </select>
+        </div>
+        <div>
+          <label className="label">Status</label>
+          <select className="field" value={props.form.active ? "1" : "0"} onChange={(event) => props.setForm((current) => ({ ...current, active: event.target.value === "1" }))}>
+            <option value="1">ativo</option>
+            <option value="0">inativo</option>
+          </select>
+        </div>
+      </div>
+      <div className="mt-4 grid gap-2 md:grid-cols-3">
+        <Toggle label="Receber campanhas geradas" checked={Boolean(props.form.receive_generated_campaigns)} onChange={(value) => props.setForm((current) => ({ ...current, receive_generated_campaigns: value }))} />
+        <Toggle label="Receber erros" checked={Boolean(props.form.receive_errors)} onChange={(value) => props.setForm((current) => ({ ...current, receive_errors: value }))} />
+        <Toggle label="Receber resumo semanal" checked={Boolean(props.form.receive_weekly_summary)} onChange={(value) => props.setForm((current) => ({ ...current, receive_weekly_summary: value }))} />
+      </div>
+      <button className="mt-5 rounded-md bg-brand px-4 py-2 text-sm font-semibold text-white" type="button" disabled={props.saving} onClick={props.onSave}>
+        {props.saving ? "Salvando..." : "Salvar notificações"}
+      </button>
+    </section>
+  );
+}
+
+function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (value: boolean) => void }) {
+  return (
+    <label className="flex items-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700">
+      <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />
+      {label}
+    </label>
   );
 }
 

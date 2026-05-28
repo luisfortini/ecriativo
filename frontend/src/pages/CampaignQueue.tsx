@@ -1,10 +1,10 @@
-import { RotateCcw } from "lucide-react";
+import { Bell, RotateCcw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { LoadingBlock } from "../components/LoadingBlock";
 import { PageHeader } from "../components/PageHeader";
-import { getCampaignQueue, reprocessQueueItem } from "../services/api";
+import { getCampaignQueue, notifyQueueError, reprocessQueueItem } from "../services/api";
 import type { CampaignQueueItem } from "../types";
 
 export function CampaignQueue() {
@@ -25,6 +25,16 @@ export function CampaignQueue() {
     load();
   }
 
+  async function notifyError(item: CampaignQueueItem) {
+    await notifyQueueError(item.id, item.error_message || "Notificacao manual de erro da fila.");
+  }
+
+  async function reprocessAndNotify(item: CampaignQueueItem) {
+    await reprocessQueueItem(item.id);
+    await notifyQueueError(item.id, item.error_message || "Item reenfileirado para reprocessamento.");
+    load();
+  }
+
   return (
     <>
       <PageHeader title="Fila de Geracao" description="Itens agendados e processados pelo worker backend." />
@@ -40,9 +50,15 @@ export function CampaignQueue() {
               </div>
               <p className="text-sm text-slate-600">{new Date(item.scheduled_at).toLocaleString("pt-BR")}</p>
               <p className="text-sm text-slate-600">{item.status}<br />{item.attempt_count}/{item.max_attempts}</p>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 {item.generated_campaign_id && <Link className="rounded-md border border-slate-300 px-3 py-2 text-xs" to={`/campanhas/${item.generated_campaign_id}`}>Campanha</Link>}
-                {item.status === "failed" && <button className="rounded-md bg-brand px-3 py-2 text-xs text-white" onClick={() => reprocess(item.id)}><RotateCcw size={14} /></button>}
+                {item.status === "failed" && (
+                  <>
+                    <button className="rounded-md border border-slate-300 px-3 py-2 text-xs" title="Notificar erro agora" onClick={() => notifyError(item)}><Bell size={14} /></button>
+                    <button className="rounded-md border border-slate-300 px-3 py-2 text-xs" title="Reprocessar e notificar" onClick={() => reprocessAndNotify(item)}><RotateCcw size={14} /></button>
+                    <button className="rounded-md bg-brand px-3 py-2 text-xs text-white" title="Reprocessar" onClick={() => reprocess(item.id)}><RotateCcw size={14} /></button>
+                  </>
+                )}
               </div>
             </div>
           ))}

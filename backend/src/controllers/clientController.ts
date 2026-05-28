@@ -23,6 +23,7 @@ const clientSchema = z.object({
   preferred_ctas: z.string().optional(),
   segment_policies: z.string().optional(),
   strategic_notes: z.string().optional(),
+  brand_memory_summary: z.string().optional(),
   site_url: z.string().optional(),
   instagram_url: z.string().optional()
 });

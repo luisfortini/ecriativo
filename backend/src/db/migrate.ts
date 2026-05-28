@@ -64,6 +64,7 @@ export function migrate() {
       preferred_ctas TEXT,
       segment_policies TEXT,
       strategic_notes TEXT,
+      brand_memory_summary TEXT,
       site_url TEXT,
       instagram_url TEXT,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -197,6 +198,11 @@ export function migrate() {
       error_message TEXT,
       tokens_input INTEGER,
       tokens_output INTEGER,
+      total_tokens INTEGER,
+      context_chars INTEGER,
+      tamanho_contexto_caracteres INTEGER,
+      agent_key TEXT,
+      context_warning TEXT,
       latency_ms INTEGER,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (agent_id) REFERENCES agents(id),
@@ -208,6 +214,85 @@ export function migrate() {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS ai_model_prices (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      model TEXT NOT NULL UNIQUE,
+      input_price_per_1m_tokens REAL NOT NULL DEFAULT 0,
+      output_price_per_1m_tokens REAL NOT NULL DEFAULT 0,
+      image_price REAL NOT NULL DEFAULT 0,
+      currency TEXT NOT NULL DEFAULT 'USD',
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS ai_usage_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      client_id INTEGER,
+      campaign_id INTEGER,
+      campaign_plan_id INTEGER,
+      queue_id INTEGER,
+      agent_id INTEGER,
+      agent_key TEXT,
+      model TEXT,
+      operation_type TEXT NOT NULL,
+      status TEXT NOT NULL,
+      input_tokens INTEGER NOT NULL DEFAULT 0,
+      output_tokens INTEGER NOT NULL DEFAULT 0,
+      total_tokens INTEGER NOT NULL DEFAULT 0,
+      input_cost REAL NOT NULL DEFAULT 0,
+      output_cost REAL NOT NULL DEFAULT 0,
+      total_cost REAL NOT NULL DEFAULT 0,
+      image_count INTEGER NOT NULL DEFAULT 0,
+      image_cost REAL NOT NULL DEFAULT 0,
+      total_estimated_cost REAL NOT NULL DEFAULT 0,
+      context_characters INTEGER NOT NULL DEFAULT 0,
+      latency_ms INTEGER,
+      error_message TEXT,
+      metadata_json TEXT,
+      price_snapshot_json TEXT,
+      source_log_id INTEGER,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (client_id) REFERENCES clients(id),
+      FOREIGN KEY (campaign_id) REFERENCES campaigns(id),
+      FOREIGN KEY (campaign_plan_id) REFERENCES campaign_plans(id),
+      FOREIGN KEY (queue_id) REFERENCES campaign_generation_queue(id),
+      FOREIGN KEY (agent_id) REFERENCES agents(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS notification_settings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      scope_type TEXT NOT NULL,
+      scope_id INTEGER,
+      channel TEXT NOT NULL DEFAULT 'whatsapp',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      settings_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS notification_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      client_id INTEGER,
+      campaign_id INTEGER,
+      campaign_plan_id INTEGER,
+      queue_id INTEGER,
+      notification_type TEXT NOT NULL,
+      channel TEXT NOT NULL DEFAULT 'whatsapp',
+      recipient TEXT NOT NULL,
+      message TEXT NOT NULL,
+      media_url TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      provider_response_json TEXT,
+      error_message TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (client_id) REFERENCES clients(id),
+      FOREIGN KEY (campaign_id) REFERENCES campaigns(id),
+      FOREIGN KEY (campaign_plan_id) REFERENCES campaign_plans(id),
+      FOREIGN KEY (queue_id) REFERENCES campaign_generation_queue(id)
     );
 
     CREATE TABLE IF NOT EXISTS campaign_plans (
@@ -287,6 +372,13 @@ export function migrate() {
     CREATE INDEX IF NOT EXISTS idx_agent_logs_agent_id ON agent_execution_logs(agent_id);
     CREATE INDEX IF NOT EXISTS idx_campaign_generation_queue_status_scheduled ON campaign_generation_queue(status, scheduled_at);
     CREATE INDEX IF NOT EXISTS idx_campaign_plans_status ON campaign_plans(status);
+    CREATE INDEX IF NOT EXISTS idx_ai_usage_created_at ON ai_usage_logs(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_ai_usage_client_id ON ai_usage_logs(client_id);
+    CREATE INDEX IF NOT EXISTS idx_ai_usage_campaign_id ON ai_usage_logs(campaign_id);
+    CREATE INDEX IF NOT EXISTS idx_ai_usage_agent_id ON ai_usage_logs(agent_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_notification_settings_scope_channel ON notification_settings(scope_type, COALESCE(scope_id, 0), channel);
+    CREATE INDEX IF NOT EXISTS idx_notification_logs_campaign_type ON notification_logs(campaign_id, notification_type);
+    CREATE INDEX IF NOT EXISTS idx_notification_logs_queue_type ON notification_logs(queue_id, notification_type);
   `);
 
   const clientColumns: Array<[string, string]> = [
@@ -306,6 +398,7 @@ export function migrate() {
     ["preferred_ctas", "TEXT"],
     ["segment_policies", "TEXT"],
     ["strategic_notes", "TEXT"],
+    ["brand_memory_summary", "TEXT"],
     ["site_url", "TEXT"],
     ["instagram_url", "TEXT"],
     ["updated_at", "TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP"]
@@ -336,9 +429,22 @@ export function migrate() {
   ];
   assetColumns.forEach(([name, definition]) => addColumn("client_assets", name, definition));
 
+  const agentLogColumns: Array<[string, string]> = [
+    ["total_tokens", "INTEGER"],
+    ["context_chars", "INTEGER"],
+    ["tamanho_contexto_caracteres", "INTEGER"],
+    ["agent_key", "TEXT"],
+    ["context_warning", "TEXT"]
+  ];
+  agentLogColumns.forEach(([name, definition]) => addColumn("agent_execution_logs", name, definition));
+
   seedAgents();
+  updateAgentSchemasForTokenOptimization();
   rebrandAgents();
   seedAppSettings();
+  seedAiModelPrices();
+  seedNotificationSettings();
+  backfillAiUsageLogs();
 }
 
 function seedAppSettings() {
@@ -348,10 +454,80 @@ function seedAppSettings() {
     image_generation_per_hour_limit: "10",
     default_retry_attempts: "3",
     queue_worker_enabled: "true",
-    min_interval_minutes: "5"
+    min_interval_minutes: "5",
+    ai_default_currency: "USD",
+    ai_cost_max_per_campaign: "0",
+    ai_cost_max_per_client_month: "0",
+    ai_cost_max_per_routine: "0",
+    ai_cost_limit_mode: "alert"
   };
   const stmt = db.prepare("INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)");
   Object.entries(defaults).forEach(([key, value]) => stmt.run(key, value));
+}
+
+function seedAiModelPrices() {
+  const models = new Set([process.env.OPENAI_TEXT_MODEL ?? "gpt-5.4-mini", process.env.OPENAI_IMAGE_MODEL ?? "gpt-image-2"]);
+  const stmt = db.prepare(
+    `INSERT OR IGNORE INTO ai_model_prices (
+      model, input_price_per_1m_tokens, output_price_per_1m_tokens, image_price, currency, active
+    ) VALUES (?, 0, 0, 0, ?, 1)`
+  );
+  models.forEach((model) => stmt.run(model, process.env.AI_DEFAULT_CURRENCY ?? "USD"));
+}
+
+function seedNotificationSettings() {
+  const defaults = {
+    evolution_base_url: "",
+    evolution_api_key: "",
+    evolution_instance_name: "",
+    evolution_text_endpoint_path: "/message/sendText/{instance}",
+    evolution_image_endpoint_path: "/message/sendMedia/{instance}",
+    evolution_connection_endpoint_path: "/instance/connectionState/{instance}",
+    default_notification_phone: "",
+    notify_on_campaign_completed: false,
+    notify_on_campaign_failed: true,
+    notify_on_queue_failed: true,
+    notify_on_agent_error: true,
+    notify_on_daily_summary: false,
+    whatsapp_delivery_enabled: false
+  };
+  db.prepare(
+    `INSERT OR IGNORE INTO notification_settings (scope_type, scope_id, channel, enabled, settings_json)
+     VALUES ('global', NULL, 'whatsapp', 1, ?)`
+  ).run(JSON.stringify(defaults));
+}
+
+function backfillAiUsageLogs() {
+  db.exec(`
+    INSERT INTO ai_usage_logs (
+      client_id, campaign_id, agent_id, agent_key, model, operation_type, status,
+      input_tokens, output_tokens, total_tokens, context_characters, latency_ms,
+      error_message, metadata_json, source_log_id, created_at
+    )
+    SELECT
+      l.client_id, l.campaign_id, l.agent_id, COALESCE(l.agent_key, a.key), a.model,
+      CASE
+        WHEN COALESCE(l.agent_key, a.key) = 'strategist_agent' THEN 'estrategista'
+        WHEN COALESCE(l.agent_key, a.key) = 'creative_agent' THEN 'criativo'
+        WHEN COALESCE(l.agent_key, a.key) = 'brand_analyzer_agent' THEN 'analise_marca'
+        ELSE 'agente'
+      END,
+      l.status,
+      COALESCE(l.tokens_input, 0),
+      COALESCE(l.tokens_output, 0),
+      COALESCE(l.total_tokens, COALESCE(l.tokens_input, 0) + COALESCE(l.tokens_output, 0)),
+      COALESCE(l.context_chars, l.tamanho_contexto_caracteres, LENGTH(l.input_json)),
+      l.latency_ms,
+      l.error_message,
+      json_object('backfilled_from', 'agent_execution_logs'),
+      l.id,
+      l.created_at
+    FROM agent_execution_logs l
+    JOIN agents a ON a.id = l.agent_id
+    WHERE NOT EXISTS (
+      SELECT 1 FROM ai_usage_logs u WHERE u.source_log_id = l.id AND u.operation_type != 'geracao_imagem'
+    );
+  `);
 }
 
 const strategistSchema = JSON.stringify({
@@ -365,7 +541,20 @@ const strategistSchema = JSON.stringify({
     headline: { type: "string" },
     texto_principal: { type: "string" },
     cta: { type: "string" },
-    briefing_criativo: { type: "string" }
+    briefing_criativo: {
+      type: "object",
+      additionalProperties: false,
+      required: ["conceito", "emocao", "composicao", "paleta", "elementos_visuais", "hierarquia", "evitar"],
+      properties: {
+        conceito: { type: "string" },
+        emocao: { type: "string" },
+        composicao: { type: "string" },
+        paleta: { type: "array", items: { type: "string" } },
+        elementos_visuais: { type: "array", items: { type: "string" } },
+        hierarquia: { type: "string" },
+        evitar: { type: "array", items: { type: "string" } }
+      }
+    }
   }
 }, null, 2);
 
@@ -436,7 +625,7 @@ function seedAgents() {
       model: process.env.OPENAI_TEXT_MODEL ?? "gpt-5.4-mini",
       temperature: 0.4,
       max_tokens: 1800,
-      system_prompt: "Voce e o Agente Estrategista do e-Criativo. Gere estrategia de anuncio em portugues do Brasil, especifica, acionavel e pronta para performance. Use a memoria do cliente como padrao, mas priorize dados da campanha atual. Respeite restricoes, cores proibidas, politicas do segmento e CTAs preferidos. Responda somente no JSON do schema.",
+      system_prompt: "Voce e o Agente Estrategista do e-Criativo. Gere uma estrategia de anuncio em portugues do Brasil, especifica, acionavel e pronta para performance. Use a memoria resumida do cliente como padrao, mas priorize dados da campanha atual. Respeite restricoes, cores proibidas, politicas do segmento e CTAs preferidos. Seja objetivo: briefing_criativo deve ser estruturado, com campos curtos, sem repetir contexto. Responda somente no JSON do schema.",
       prompt_template: "Contexto completo da campanha e memoria do cliente:\\n{{context_json}}",
       output_schema_json: strategistSchema,
       execution_order: 1
@@ -453,7 +642,7 @@ function seedAgents() {
       model: process.env.OPENAI_TEXT_MODEL ?? "gpt-5.4-mini",
       temperature: 0.5,
       max_tokens: 1800,
-      system_prompt: "Voce e o Agente Criativo do e-Criativo. Transforme o briefing estrategico em prompt de imagem publicitaria claro. Preserve identidade visual do cliente, cite assets disponiveis por URL quando forem relevantes, siga estilos aprovados e evite estilos reprovados, cores proibidas, logos inventados e texto ilegivel. Responda somente no JSON do schema.",
+      system_prompt: "Voce e o Agente Criativo do e-Criativo. Transforme a estrategia objetiva em prompt de imagem publicitaria claro. Preserve identidade visual do cliente, use referencias aprovadas quando relevantes, siga estilos aprovados e evite estilos reprovados, cores proibidas, logos inventados e texto ilegivel. Seja conciso e nao repita memoria do cliente. Responda somente no JSON do schema.",
       prompt_template: "Briefing normalizado e estrategia aprovada:\\n{{context_json}}",
       output_schema_json: creativeSchema,
       execution_order: 2
@@ -490,6 +679,36 @@ function seedAgents() {
       SELECT 1 FROM agent_versions av WHERE av.agent_id = a.id
     );
   `);
+}
+
+function updateAgentSchemasForTokenOptimization() {
+  db.prepare(
+    `UPDATE agents
+     SET output_schema_json = ?,
+         system_prompt = ?,
+         prompt_template = ?,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE key = 'strategist_agent'
+       AND output_schema_json LIKE '%briefing_criativo%string%'`
+  ).run(
+    strategistSchema,
+    "Voce e o Agente Estrategista do e-Criativo. Gere uma estrategia de anuncio em portugues do Brasil, especifica, acionavel e pronta para performance. Use a memoria resumida do cliente como padrao, mas priorize dados da campanha atual. Respeite restricoes, cores proibidas, politicas do segmento e CTAs preferidos. Seja objetivo: briefing_criativo deve ser estruturado, com campos curtos, sem repetir contexto. Responda somente no JSON do schema.",
+    "Contexto enxuto da campanha e memoria consolidada do cliente:\\n{{context_json}}"
+  );
+
+  db.prepare(
+    `UPDATE agents
+     SET output_schema_json = ?,
+         system_prompt = ?,
+         prompt_template = ?,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE key = 'creative_agent'
+       AND prompt_template LIKE '%Briefing normalizado%'`
+  ).run(
+    creativeSchema,
+    "Voce e o Agente Criativo do e-Criativo. Transforme a estrategia objetiva em prompt de imagem publicitaria claro. Preserve identidade visual do cliente, use referencias aprovadas quando relevantes, siga estilos aprovados e evite estilos reprovados, cores proibidas, logos inventados e texto ilegivel. Seja conciso e nao repita memoria do cliente. Responda somente no JSON do schema.",
+    "Estrategia objetiva, memoria visual resumida e restricoes atuais:\\n{{context_json}}"
+  );
 }
 
 function rebrandAgents() {

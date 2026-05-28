@@ -1,4 +1,5 @@
 import type { ClientAsset, ClientProfile, NewCampaignInput, NormalizedBriefing } from "../types.js";
+import { buildClientPromptContext } from "./clientPromptContextService.js";
 
 function pick(current: string | undefined, memory: string | null | undefined, fallback = "") {
   return current?.trim() || memory?.trim() || fallback;
@@ -6,6 +7,7 @@ function pick(current: string | undefined, memory: string | null | undefined, fa
 
 export function normalizeBriefing(input: NewCampaignInput, client: ClientProfile, assets: ClientAsset[]): NormalizedBriefing {
   const latestAnalysis = getLatestAnalysisOutput(client);
+  const clientPromptContext = buildClientPromptContext(input.client_id);
   const approvedReferences = assets.filter((asset) => ["approved_reference", "approved_ad", "reference_image", "logo_main", "brand_material"].includes(asset.type));
   const rejectedReferences = assets.filter((asset) => ["rejected_reference", "rejected_ad"].includes(asset.type));
   const extractedPalette = assets
@@ -19,8 +21,7 @@ export function normalizeBriefing(input: NewCampaignInput, client: ClientProfile
     .join("\n");
 
   return {
-    client,
-    assets,
+    client_prompt_context: clientPromptContext,
     free_briefing: input.free_briefing.trim(),
     objective: input.objetivo?.trim() || input.free_briefing.trim(),
     offer: input.oferta?.trim() || "Oferta definida no briefing livre",
@@ -37,8 +38,8 @@ export function normalizeBriefing(input: NewCampaignInput, client: ClientProfile
     preferred_typography: client.preferred_typography ?? "",
     approved_styles: client.approved_styles || latestAnalysis.approved_styles,
     forbidden_styles: client.forbidden_styles || latestAnalysis.forbidden_styles,
-    approved_references: approvedReferences,
-    rejected_references: rejectedReferences,
+    approved_references: approvedReferences.slice(0, 5).map(referenceForPrompt),
+    rejected_references: rejectedReferences.slice(0, 5).map(referenceForPrompt),
     extracted_palette: extractedPalette,
     visual_learnings: visualLearnings,
     posting_patterns: latestAnalysis.content_patterns,
@@ -47,6 +48,15 @@ export function normalizeBriefing(input: NewCampaignInput, client: ClientProfile
     strategic_notes: client.strategic_notes || latestAnalysis.strategic_notes,
     source_priority:
       "Dados preenchidos na campanha atual têm prioridade. Memória do cliente serve como padrão. Não sobrescrever memória sem ação explícita do usuário."
+  };
+}
+
+function referenceForPrompt(asset: ClientAsset) {
+  return {
+    type: asset.type,
+    file_url: asset.file_url,
+    description: asset.description,
+    ai_summary: asset.ai_summary
   };
 }
 

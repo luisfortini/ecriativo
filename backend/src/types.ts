@@ -62,6 +62,7 @@ export interface ClientProfile {
   preferred_ctas: string | null;
   segment_policies: string | null;
   strategic_notes: string | null;
+  brand_memory_summary: string | null;
   site_url: string | null;
   instagram_url: string | null;
   brand_analyses?: ClientBrandAnalysis[];
@@ -119,8 +120,7 @@ export interface ClientBrandAnalysis {
 }
 
 export interface NormalizedBriefing {
-  client: ClientProfile;
-  assets: ClientAsset[];
+  client_prompt_context: ClientPromptContext;
   free_briefing: string;
   objective: string;
   offer: string;
@@ -137,8 +137,8 @@ export interface NormalizedBriefing {
   preferred_typography: string;
   approved_styles: string;
   forbidden_styles: string;
-  approved_references: ClientAsset[];
-  rejected_references: ClientAsset[];
+  approved_references: Array<{ type: ClientAssetType; file_url: string; description: string | null; ai_summary: string | null }>;
+  rejected_references: Array<{ type: ClientAssetType; file_url: string; description: string | null; ai_summary: string | null }>;
   extracted_palette: string;
   visual_learnings: string;
   posting_patterns: string;
@@ -148,6 +148,49 @@ export interface NormalizedBriefing {
   source_priority: string;
 }
 
+export interface ClientPromptContext {
+  nome: string;
+  segmento: string;
+  descricao_resumida_negocio: string;
+  publico_alvo_principal: string;
+  posicionamento: string;
+  tom_de_voz: string;
+  paleta_de_cores: string;
+  cores_proibidas: string;
+  tipografia_preferida: string;
+  estilo_visual_aprovado: string;
+  estilo_visual_proibido: string;
+  ctas_preferidos: string;
+  restricoes_comunicacao: string;
+  resumo_memoria_marca: string;
+  aprendizados_recentes: string;
+  ultimas_campanhas_resumidas: Array<{
+    id: number;
+    resumo: string;
+    created_at: string;
+  }>;
+  referencias_aprovadas_resumidas: Array<{
+    tipo: string;
+    resumo: string;
+    url?: string;
+  }>;
+  referencias_reprovadas_resumidas: Array<{
+    tipo: string;
+    resumo: string;
+    url?: string;
+  }>;
+}
+
+export interface CreativeBriefing {
+  conceito: string;
+  emocao: string;
+  composicao: string;
+  paleta: string[];
+  elementos_visuais: string[];
+  hierarquia: string;
+  evitar: string[];
+}
+
 export interface StrategyOutput {
   angulo: string;
   publico: string;
@@ -155,7 +198,7 @@ export interface StrategyOutput {
   headline: string;
   texto_principal: string;
   cta: string;
-  briefing_criativo: string;
+  briefing_criativo: CreativeBriefing;
 }
 
 export interface CreativeOutput {
@@ -209,6 +252,11 @@ export interface AgentExecutionLog {
   error_message: string | null;
   tokens_input: number | null;
   tokens_output: number | null;
+  total_tokens: number | null;
+  context_chars: number | null;
+  tamanho_contexto_caracteres: number | null;
+  agent_key: string | null;
+  context_warning: string | null;
   latency_ms: number | null;
   created_at: string;
 }

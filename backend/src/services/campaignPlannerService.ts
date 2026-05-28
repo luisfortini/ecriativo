@@ -2,6 +2,7 @@ import { db } from "../db/connection.js";
 import type { CampaignFormat } from "../types.js";
 import { createCampaign, setCampaignCreativeStatus } from "./campaignService.js";
 import { getClient } from "./clientService.js";
+import { sendQueueFailedAsync } from "./whatsappNotificationService.js";
 
 type RecurrenceType = "once" | "daily" | "weekly" | "biweekly" | "monthly";
 type PlanStatus = "draft" | "active" | "paused" | "completed";
@@ -289,14 +290,22 @@ async function processQueueItem(item: QueueItem) {
       )
       .all(item.client_id, `%${plan.theme}%`);
 
-    const campaign = await createCampaign({
-      client_id: item.client_id,
-      free_briefing: buildAutoBriefing(plan, item, history),
-      objetivo: plan.objective,
-      oferta: plan.theme,
-      formato: plan.ad_format as CampaignFormat,
-      observacoes: `Gerado pelo planejamento ${plan.name}. Variacao desejada: ${item.variation_type || plan.variation_mode}.`
-    });
+    const campaign = await createCampaign(
+      {
+        client_id: item.client_id,
+        free_briefing: buildAutoBriefing(plan, item, history),
+        objetivo: plan.objective,
+        oferta: plan.theme,
+        formato: plan.ad_format as CampaignFormat,
+        observacoes: `Gerado pelo planejamento ${plan.name}. Variacao desejada: ${item.variation_type || plan.variation_mode}.`
+      },
+      undefined,
+      {
+        campaignPlanId: item.campaign_plan_id,
+        queueId: item.id,
+        reprocess: item.attempt_count > 0
+      }
+    );
 
     if (!campaign) throw new Error("Campanha nao retornada.");
     const creativeStatus = plan.approval_mode === "draft" ? "draft" : plan.approval_mode === "approved" ? "approved" : "waiting_review";
@@ -320,6 +329,7 @@ async function processQueueItem(item: QueueItem) {
        WHERE id = ?`
     ).run(failed ? "failed" : "pending", message, `+${delay} minutes`, failed ? new Date().toISOString() : null, item.id);
     logPlan(item.id, item.campaign_plan_id, item.client_id, failed ? "failed" : "retry", message, { next_retry_minutes: failed ? null : delay });
+    if (failed) sendQueueFailedAsync(item.id, error);
   } finally {
     running -= 1;
   }

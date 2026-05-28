@@ -4,6 +4,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { config } from "../config.js";
 import type { CampaignFormat, CreativeOutput, NormalizedBriefing, StrategyOutput } from "../types.js";
+import { recordAiUsage, type AiOperationType } from "./aiCostService.js";
 
 const strategySchema = {
   type: "object",
@@ -16,7 +17,20 @@ const strategySchema = {
     headline: { type: "string" },
     texto_principal: { type: "string" },
     cta: { type: "string" },
-    briefing_criativo: { type: "string" }
+    briefing_criativo: {
+      type: "object",
+      additionalProperties: false,
+      required: ["conceito", "emocao", "composicao", "paleta", "elementos_visuais", "hierarquia", "evitar"],
+      properties: {
+        conceito: { type: "string" },
+        emocao: { type: "string" },
+        composicao: { type: "string" },
+        paleta: { type: "array", items: { type: "string" } },
+        elementos_visuais: { type: "array", items: { type: "string" } },
+        hierarquia: { type: "string" },
+        evitar: { type: "array", items: { type: "string" } }
+      }
+    }
   }
 } as const;
 
@@ -98,26 +112,63 @@ export async function runCreativeAgent(input: NormalizedBriefing, strategy: Stra
   return JSON.parse(outputText(response)) as CreativeOutput;
 }
 
-export async function generateImage(prompt: string, format: CampaignFormat) {
+export async function generateImage(
+  prompt: string,
+  format: CampaignFormat,
+  metadata?: { clientId?: number | null; campaignId?: number | null; campaignPlanId?: number | null; queueId?: number | null; operationType?: AiOperationType }
+) {
   if (!client) return createLocalPlaceholder(prompt, format);
+  const started = Date.now();
 
-  const response = await client.images.generate({
-    model: config.imageModel,
-    prompt,
-    size: imageSize(format),
-    quality: "medium",
-    n: 1
-  });
+  try {
+    const response = await client.images.generate({
+      model: config.imageModel,
+      prompt,
+      size: imageSize(format),
+      quality: "medium",
+      n: 1
+    });
 
-  const image = response.data?.[0];
-  if (image?.b64_json) {
-    const buffer = Buffer.from(image.b64_json, "base64");
-    return saveGeneratedImage(buffer, "png");
+    const aiUsageLogId = recordAiUsage({
+      clientId: metadata?.clientId ?? null,
+      campaignId: metadata?.campaignId ?? null,
+      campaignPlanId: metadata?.campaignPlanId ?? null,
+      queueId: metadata?.queueId ?? null,
+      model: config.imageModel,
+      operationType: metadata?.operationType ?? "geracao_imagem",
+      status: "success",
+      imageCount: 1,
+      contextCharacters: prompt.length,
+      latencyMs: Date.now() - started,
+      metadata: { format, prompt_preview: prompt.slice(0, 600) }
+    });
+
+    const image = response.data?.[0];
+    if (image?.b64_json) {
+      const buffer = Buffer.from(image.b64_json, "base64");
+      return { ...(await saveGeneratedImage(buffer, "png")), aiUsageLogId };
+    }
+
+    if (image?.url) return { imagePath: null, imageUrl: image.url, aiUsageLogId };
+
+    throw new Error("A geracao de imagem nao retornou arquivo ou URL.");
+  } catch (error) {
+    recordAiUsage({
+      clientId: metadata?.clientId ?? null,
+      campaignId: metadata?.campaignId ?? null,
+      campaignPlanId: metadata?.campaignPlanId ?? null,
+      queueId: metadata?.queueId ?? null,
+      model: config.imageModel,
+      operationType: metadata?.operationType ?? "geracao_imagem",
+      status: "error",
+      imageCount: 0,
+      contextCharacters: prompt.length,
+      latencyMs: Date.now() - started,
+      errorMessage: error instanceof Error ? error.message : "Erro ao gerar imagem.",
+      metadata: { format }
+    });
+    throw error;
   }
-
-  if (image?.url) return { imagePath: null, imageUrl: image.url };
-
-  throw new Error("A geracao de imagem nao retornou arquivo ou URL.");
 }
 
 function imageSize(format: CampaignFormat) {
@@ -150,18 +201,40 @@ function localStrategy(input: NormalizedBriefing): StrategyOutput {
   return {
     angulo: `Transformar ${input.offer} em uma decisao simples para ${input.target_audience || "o publico principal"}.`,
     publico: input.target_audience,
-    promessa: `Ajudar ${input.target_audience || "o publico"} a avancar em ${input.objective} com uma oferta clara e alinhada a ${input.client.name}.`,
-    headline: `${input.offer} para ${input.client.segment || input.client.name}`,
+    promessa: `Ajudar ${input.target_audience || "o publico"} a avancar em ${input.objective} com uma oferta clara e alinhada a ${input.client_prompt_context.nome}.`,
+    headline: `${input.offer} para ${input.client_prompt_context.segmento || input.client_prompt_context.nome}`,
     texto_principal: `Campanha com tom ${input.brand_voice || "definido pela marca"}, respeitando posicionamento, restricoes e historico criativo do cliente.`,
     cta: input.preferred_ctas.split("\n")[0]?.replace(/^- /, "") || "Conheca a oferta",
-    briefing_criativo: `Anuncio ${input.format} para ${input.client.name}, segmento ${input.client.segment || "nao informado"}, paleta ${input.color_palette || "da marca"}, referencias ${input.visual_references || "memoria visual do cliente"}, estilos aprovados ${input.approved_styles || "nao informados"}, evitar ${input.forbidden_styles || "estilos fora da marca"}.`
+    briefing_criativo: {
+      conceito: `Anuncio ${input.format} para ${input.client_prompt_context.nome}, segmento ${input.client_prompt_context.segmento || "nao informado"}.`,
+      emocao: "Clareza, confianca e desejo pela oferta.",
+      composicao: "Composicao publicitaria moderna com foco na promessa principal.",
+      paleta: (input.color_palette || input.client_prompt_context.paleta_de_cores || "da marca").split(",").map((item) => item.trim()).filter(Boolean).slice(0, 5),
+      elementos_visuais: ["identidade visual da marca", "oferta em destaque"],
+      hierarquia: "Headline, beneficio principal, prova visual e CTA.",
+      evitar: (input.forbidden_styles || input.client_prompt_context.estilo_visual_proibido || "texto ilegivel").split(",").map((item) => item.trim()).filter(Boolean).slice(0, 5)
+    }
   };
 }
 
 function localCreative(input: NormalizedBriefing, strategy: StrategyOutput): CreativeOutput {
   return {
-    prompt_imagem: `${strategy.briefing_criativo}. Composicao publicitaria moderna, hierarquia clara, tom ${input.brand_voice}, tipografia ${input.preferred_typography || "limpa"}, assets disponiveis: ${input.assets.map((asset) => `${asset.type}: ${asset.file_url}`).join(", ") || "nenhum"}. Sem texto pequeno ilegivel, pronto para midia paga.`,
+    prompt_imagem: `${formatCreativeBriefing(strategy.briefing_criativo)}. Composicao publicitaria moderna, hierarquia clara, tom ${input.brand_voice}, tipografia ${input.preferred_typography || "limpa"}. Sem texto pequeno ilegivel, pronto para midia paga.`,
     negative_prompt: `baixa resolucao, texto distorcido, logotipos inventados, poluicao visual, aparencia amadora, ${input.forbidden_colors}, ${input.forbidden_styles}`,
     direcao_visual_resumida: `Criativo ${input.format} com foco na promessa: ${strategy.promessa}`
   };
+}
+
+function formatCreativeBriefing(value: StrategyOutput["briefing_criativo"]) {
+  return [
+    value.conceito,
+    value.emocao ? `Emocao: ${value.emocao}` : "",
+    value.composicao ? `Composicao: ${value.composicao}` : "",
+    value.paleta.length ? `Paleta: ${value.paleta.join(", ")}` : "",
+    value.elementos_visuais.length ? `Elementos: ${value.elementos_visuais.join(", ")}` : "",
+    value.hierarquia ? `Hierarquia: ${value.hierarquia}` : "",
+    value.evitar.length ? `Evitar: ${value.evitar.join(", ")}` : ""
+  ]
+    .filter(Boolean)
+    .join(". ");
 }

@@ -1,10 +1,10 @@
-import { Check, Copy, ImageIcon, Repeat2, Save, ThumbsDown, ThumbsUp, X } from "lucide-react";
+import { Check, Copy, ExternalLink, ImageIcon, MessageCircle, Repeat2, Save, ThumbsDown, ThumbsUp, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { LoadingBlock } from "../components/LoadingBlock";
 import { PageHeader } from "../components/PageHeader";
-import { getCampaign, saveCampaignLearning, updateCampaignStatus } from "../services/api";
+import { getCampaign, saveCampaignLearning, sendCampaignWhatsapp, updateCampaignStatus } from "../services/api";
 import type { CampaignDetail } from "../types";
 
 export function CampaignResult() {
@@ -35,6 +35,18 @@ export function CampaignResult() {
     if (!campaign) return;
     const updated = await updateCampaignStatus(campaign.id, status);
     setCampaign(updated);
+  }
+
+  async function sendWhatsapp() {
+    if (!campaign) return;
+    setMessage("");
+    setError("");
+    try {
+      await sendCampaignWhatsapp(campaign.id);
+      setMessage("Envio via WhatsApp solicitado.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Nao foi possivel enviar via WhatsApp.");
+    }
   }
 
   if (loading) return <LoadingBlock label="Carregando resultado..." />;
@@ -74,7 +86,7 @@ export function CampaignResult() {
 
           <Block title="Direcao Criativa">
             <Info label="Resumo visual" value={campaign.creative.direcao_visual_resumida} />
-            <Info label="Briefing criativo" value={campaign.strategy.briefing_criativo} />
+            <Info label="Briefing criativo" value={formatCreativeBriefing(campaign.strategy.briefing_criativo)} />
             <PromptBox value={campaign.creative.prompt_imagem} />
             <Info label="Negative prompt" value={campaign.creative.negative_prompt} />
           </Block>
@@ -95,6 +107,22 @@ export function CampaignResult() {
               )}
             </div>
             <div className="border-t border-slate-200 bg-white p-4">
+              <div className="mb-3 grid grid-cols-2 gap-2">
+                <button className="inline-flex items-center justify-center gap-2 rounded-md bg-brand px-3 py-2 text-xs font-semibold text-white" type="button" onClick={sendWhatsapp}>
+                  <MessageCircle size={14} /> Enviar via WhatsApp
+                </button>
+                <button className="inline-flex items-center justify-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700" type="button" onClick={sendWhatsapp}>
+                  <MessageCircle size={14} /> Reenviar
+                </button>
+                <button className="inline-flex items-center justify-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700" type="button" onClick={() => navigator.clipboard.writeText(adCaption)}>
+                  <Copy size={14} /> Copiar legenda
+                </button>
+                {campaign.image_url && (
+                  <a className="inline-flex items-center justify-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700" href={campaign.image_url} target="_blank">
+                    <ExternalLink size={14} /> Abrir imagem
+                  </a>
+                )}
+              </div>
               <div className="mb-3 flex items-center justify-between gap-3">
                 <h2 className="font-semibold text-ink">Legenda do anuncio</h2>
                 <button
@@ -140,6 +168,21 @@ function buildAdCaption(campaign: CampaignDetail) {
   );
   const caption = sectionStart >= 0 ? text.slice(0, sectionStart) : text;
   return caption.trim() || text.trim();
+}
+
+function formatCreativeBriefing(value: CampaignDetail["strategy"]["briefing_criativo"]) {
+  if (typeof value === "string") return value;
+  return [
+    value.conceito,
+    value.emocao ? `Emocao: ${value.emocao}` : "",
+    value.composicao ? `Composicao: ${value.composicao}` : "",
+    value.paleta?.length ? `Paleta: ${value.paleta.join(", ")}` : "",
+    value.elementos_visuais?.length ? `Elementos: ${value.elementos_visuais.join(", ")}` : "",
+    value.hierarquia ? `Hierarquia: ${value.hierarquia}` : "",
+    value.evitar?.length ? `Evitar: ${value.evitar.join(", ")}` : ""
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function Action({ label, icon, full, onClick }: { label: string; icon: React.ReactNode; full?: boolean; onClick: () => void }) {

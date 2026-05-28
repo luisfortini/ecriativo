@@ -21,6 +21,7 @@ const clientFields = [
   "preferred_ctas",
   "segment_policies",
   "strategic_notes",
+  "brand_memory_summary",
   "site_url",
   "instagram_url"
 ] as const;
@@ -66,12 +67,12 @@ export function createClient(payload: ClientPayload) {
         name, segment, business_description, target_audience, differentiators, brand_voice,
         positioning, color_palette, forbidden_colors, preferred_typography, visual_references,
         approved_styles, forbidden_styles, communication_restrictions, preferred_ctas,
-        segment_policies, strategic_notes, site_url, instagram_url
+        segment_policies, strategic_notes, brand_memory_summary, site_url, instagram_url
       ) VALUES (
         @name, @segment, @business_description, @target_audience, @differentiators, @brand_voice,
         @positioning, @color_palette, @forbidden_colors, @preferred_typography, @visual_references,
         @approved_styles, @forbidden_styles, @communication_restrictions, @preferred_ctas,
-        @segment_policies, @strategic_notes, @site_url, @instagram_url
+        @segment_policies, @strategic_notes, @brand_memory_summary, @site_url, @instagram_url
       )`
     )
     .run(cleanPayload(payload));

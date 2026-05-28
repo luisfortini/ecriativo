@@ -51,6 +51,7 @@ export interface ClientProfile extends ClientSummary {
   preferred_ctas: string | null;
   segment_policies: string | null;
   strategic_notes: string | null;
+  brand_memory_summary: string | null;
   site_url: string | null;
   instagram_url: string | null;
   assets: ClientAsset[];
@@ -96,7 +97,17 @@ export interface Strategy {
   headline: string;
   texto_principal: string;
   cta: string;
-  briefing_criativo: string;
+  briefing_criativo:
+    | string
+    | {
+        conceito: string;
+        emocao: string;
+        composicao: string;
+        paleta: string[];
+        elementos_visuais: string[];
+        hierarquia: string;
+        evitar: string[];
+      };
 }
 
 export interface Creative {
@@ -190,6 +201,11 @@ export interface AgentExecutionLog {
   error_message: string | null;
   tokens_input: number | null;
   tokens_output: number | null;
+  total_tokens: number | null;
+  context_chars: number | null;
+  tamanho_contexto_caracteres: number | null;
+  agent_key: string | null;
+  context_warning: string | null;
   latency_ms: number | null;
   created_at: string;
 }
@@ -260,4 +276,25 @@ export interface CampaignGenerationLog {
   message: string;
   metadata_json: string | null;
   created_at: string;
+}
+
+export interface AiCostDashboard {
+  summary: Record<string, any>;
+  groups: Record<string, Array<Record<string, any>>>;
+  rankings: Record<string, Array<Record<string, any>>>;
+  insights: string[];
+  alerts: string[];
+  logs: Array<Record<string, any>>;
+}
+
+export interface AiModelPrice {
+  id: number;
+  model: string;
+  input_price_per_1m_tokens: number;
+  output_price_per_1m_tokens: number;
+  image_price: number;
+  currency: string;
+  active: number;
+  created_at: string;
+  updated_at: string;
 }

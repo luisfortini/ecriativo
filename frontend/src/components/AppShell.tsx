@@ -1,10 +1,12 @@
-import { Bot, CalendarClock, Clock3, LayoutDashboard, Plus, Users } from "lucide-react";
+import { Bot, CalendarClock, Clock3, DollarSign, LayoutDashboard, MessageCircle, Plus, Users } from "lucide-react";
 import { NavLink, Outlet } from "react-router-dom";
 
 const navItems = [
   { to: "/", label: "Campanhas", icon: LayoutDashboard },
   { to: "/clientes", label: "Clientes", icon: Users },
   { to: "/agentes", label: "Central de Agentes", icon: Bot },
+  { to: "/custos-ia", label: "Custos de IA", icon: DollarSign },
+  { to: "/whatsapp", label: "WhatsApp", icon: MessageCircle },
   { to: "/planejador", label: "Planejador", icon: CalendarClock },
   { to: "/nova-campanha", label: "Nova campanha", icon: Plus },
   { to: "/historico", label: "Historico", icon: Clock3 }

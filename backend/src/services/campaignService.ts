@@ -1,23 +1,42 @@
 import { db } from "../db/connection.js";
 import type { CampaignRecord, ClientProfile, CreativeOutput, NewCampaignInput, NormalizedBriefing, StrategyOutput } from "../types.js";
 import { executeAgentByKey } from "./agentService.js";
+import { updateAiUsageCampaign } from "./aiCostService.js";
+import { sendCampaignCompletedAsync } from "./whatsappNotificationService.js";
 import { normalizeBriefing } from "./briefingNormalizerService.js";
 import { appendClientLearning, getClient, listClientAssets } from "./clientService.js";
 import { generateImage } from "./openaiService.js";
 
-export async function createCampaign(input: NewCampaignInput, referenceFilePath?: string) {
+export async function createCampaign(
+  input: NewCampaignInput,
+  referenceFilePath?: string,
+  options?: { campaignPlanId?: number | null; queueId?: number | null; reprocess?: boolean }
+) {
   const client = getClient(input.client_id);
   if (!client) throw new Error("Cliente nao encontrado.");
 
   const assets = listClientAssets(input.client_id);
   const normalized = normalizeBriefing(input, client as ClientProfile, assets);
   const strategistRun = await executeAgentByKey<StrategyOutput>("strategist_agent", { ...normalized, arquivo_referencia_campanha: referenceFilePath ?? null }, {
-    clientId: input.client_id
+    clientId: input.client_id,
+    campaignPlanId: options?.campaignPlanId ?? null,
+    queueId: options?.queueId ?? null,
+    operationType: options?.reprocess ? "reprocessamento" : "estrategista"
   });
   const strategy = strategistRun.parsed;
-  const creativeRun = await executeAgentByKey<CreativeOutput>("creative_agent", { briefing_normalizado: normalized, estrategia: strategy }, { clientId: input.client_id });
+  const creativeRun = await executeAgentByKey<CreativeOutput>("creative_agent", buildCreativeAgentContext(normalized, strategy), {
+    clientId: input.client_id,
+    campaignPlanId: options?.campaignPlanId ?? null,
+    queueId: options?.queueId ?? null,
+    operationType: options?.reprocess ? "reprocessamento" : "criativo"
+  });
   const creative = creativeRun.parsed;
-  const image = await generateImage(creative.prompt_imagem, input.formato);
+  const image = await generateImage(creative.prompt_imagem, input.formato, {
+    clientId: input.client_id,
+    campaignPlanId: options?.campaignPlanId ?? null,
+    queueId: options?.queueId ?? null,
+    operationType: options?.reprocess ? "reprocessamento" : "geracao_imagem"
+  });
 
   const result = db
     .prepare(
@@ -35,8 +54,8 @@ export async function createCampaign(input: NewCampaignInput, referenceFilePath?
     )
     .run({
       client_id: input.client_id,
-      cliente: normalized.client.name,
-      segmento: normalized.client.segment,
+      cliente: normalized.client_prompt_context.nome,
+      segmento: normalized.client_prompt_context.segmento,
       objetivo: normalized.objective,
       publico_alvo: normalized.target_audience,
       oferta: normalized.offer,
@@ -67,8 +86,50 @@ export async function createCampaign(input: NewCampaignInput, referenceFilePath?
     strategistRun.agent.id,
     creativeRun.agent.id
   );
+  updateAiUsageCampaign([strategistRun.ai_usage_log_id, creativeRun.ai_usage_log_id, "aiUsageLogId" in image ? image.aiUsageLogId : null], campaignId);
+  sendCampaignCompletedAsync(campaignId);
 
   return getCampaign(campaignId);
+}
+
+function buildCreativeAgentContext(normalized: NormalizedBriefing, strategy: StrategyOutput) {
+  return {
+    estrategia_objetiva: limitStrategyForCreative(strategy),
+    client_prompt_context: normalized.client_prompt_context,
+    formato_desejado: normalized.format,
+    restricoes_campanha_atual: {
+      objetivo: truncate(normalized.objective, 500),
+      oferta: truncate(normalized.offer, 500),
+      publico_alvo: truncate(normalized.target_audience, 500),
+      restricoes: truncate(normalized.restrictions, 700),
+      observacoes: truncate(normalized.observations, 700),
+      cores_proibidas: truncate(normalized.forbidden_colors, 360),
+      estilos_proibidos: truncate(normalized.forbidden_styles, 700),
+      referencias_aprovadas: normalized.client_prompt_context.referencias_aprovadas_resumidas,
+      referencias_reprovadas: normalized.client_prompt_context.referencias_reprovadas_resumidas
+    }
+  };
+}
+
+function limitStrategyForCreative(strategy: StrategyOutput) {
+  return truncateDeep(strategy, {
+    defaultString: 700,
+    briefingCriativo: 2500,
+    total: 4000
+  }) as StrategyOutput;
+}
+
+function truncateDeep(value: unknown, limits: { defaultString: number; briefingCriativo: number; total: number }, key = ""): unknown {
+  if (typeof value === "string") return truncate(value, key === "briefing_criativo" ? limits.briefingCriativo : limits.defaultString);
+  if (Array.isArray(value)) return value.slice(0, 12).map((item) => truncateDeep(item, limits));
+  if (!value || typeof value !== "object") return value;
+  const compact = Object.fromEntries(Object.entries(value).map(([itemKey, itemValue]) => [itemKey, truncateDeep(itemValue, limits, itemKey)]));
+  return compact;
+}
+
+function truncate(value: string, max: number) {
+  const clean = String(value ?? "").replace(/\s+/g, " ").trim();
+  return clean.length > max ? `${clean.slice(0, max - 1).trim()}...` : clean;
 }
 
 export function setCampaignCreativeStatus(campaignId: number, creativeStatus: "draft" | "waiting_review" | "approved" | "rejected") {
