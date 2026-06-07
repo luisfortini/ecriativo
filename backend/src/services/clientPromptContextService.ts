@@ -1,4 +1,4 @@
-import { db } from "../db/connection.js";
+import { all, get } from "../db/connection.js";
 import type { ClientAsset, ClientPromptContext } from "../types.js";
 
 const LIMITS = {
@@ -14,12 +14,12 @@ const LIMITS = {
 const approvedTypes = new Set(["approved_reference", "approved_ad", "reference_image", "logo_main", "brand_material"]);
 const rejectedTypes = new Set(["rejected_reference", "rejected_ad"]);
 
-export function buildClientPromptContext(clientId: number): ClientPromptContext {
-  const client = db.prepare("SELECT * FROM clients WHERE id = ?").get(clientId) as Record<string, string | number | null> | undefined;
+export async function buildClientPromptContext(clientId: number): Promise<ClientPromptContext> {
+  const client = await get<Record<string, string | number | null>>("SELECT * FROM clients WHERE id = ?", [clientId]);
   if (!client) throw new Error("Cliente nao encontrado.");
 
-  const assets = db.prepare("SELECT * FROM client_assets WHERE client_id = ? ORDER BY created_at DESC").all(clientId) as ClientAsset[];
-  const latestAnalysis = latestBrandAnalysisSummary(clientId);
+  const assets = await all<ClientAsset>("SELECT * FROM client_assets WHERE client_id = ? ORDER BY created_at DESC", [clientId]);
+  const latestAnalysis = await latestBrandAnalysisSummary(clientId);
 
   return compactObject({
     nome: text(client.name),
@@ -37,24 +37,23 @@ export function buildClientPromptContext(clientId: number): ClientPromptContext 
     restricoes_comunicacao: truncate(text(client.communication_restrictions), LIMITS.field),
     resumo_memoria_marca: truncate(text(client.brand_memory_summary || latestAnalysis.strategic_notes || client.strategic_notes), LIMITS.brandMemorySummary),
     aprendizados_recentes: truncate(buildRecentLearnings(client, assets), LIMITS.brandMemorySummary),
-    ultimas_campanhas_resumidas: recentCampaigns(clientId),
+    ultimas_campanhas_resumidas: await recentCampaigns(clientId),
     referencias_aprovadas_resumidas: summarizeReferences(assets.filter((asset) => approvedTypes.has(asset.type)), LIMITS.approvedReferences),
     referencias_reprovadas_resumidas: summarizeReferences(assets.filter((asset) => rejectedTypes.has(asset.type)), LIMITS.rejectedReferences)
   }) as ClientPromptContext;
 }
 
-function latestBrandAnalysisSummary(clientId: number) {
-  const row = db
-    .prepare(
-      `SELECT suggested_brand_voice, suggested_color_palette, suggested_positioning,
-              suggested_target_audience, suggested_visual_style, suggested_ctas,
-              suggested_restrictions, raw_ai_output_json
-       FROM client_brand_analysis
-       WHERE client_id = ?
-       ORDER BY created_at DESC
-       LIMIT 1`
-    )
-    .get(clientId) as Record<string, string | null> | undefined;
+async function latestBrandAnalysisSummary(clientId: number) {
+  const row = await get<Record<string, string | null>>(
+    `SELECT suggested_brand_voice, suggested_color_palette, suggested_positioning,
+            suggested_target_audience, suggested_visual_style, suggested_ctas,
+            suggested_restrictions, raw_ai_output_json
+     FROM client_brand_analysis
+     WHERE client_id = ?
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [clientId]
+  );
 
   if (!row) return emptyAnalysis();
 
@@ -107,17 +106,17 @@ function buildRecentLearnings(client: Record<string, string | number | null>, as
     .join("\n");
 }
 
-function recentCampaigns(clientId: number) {
-  return db
-    .prepare(
-      `SELECT id, objetivo, oferta, formato, strategist_output_json, creative_output_json, strategy_json, creative_json, created_at
-       FROM campaigns
-       WHERE client_id = ?
-       ORDER BY created_at DESC
-       LIMIT ?`
-    )
-    .all(clientId, LIMITS.recentCampaigns)
-    .map((row) => {
+async function recentCampaigns(clientId: number) {
+  const rows = await all<Record<string, string | number | null>>(
+    `SELECT id, objetivo, oferta, formato, strategist_output_json, creative_output_json, strategy_json, creative_json, created_at
+     FROM campaigns
+     WHERE client_id = ?
+     ORDER BY created_at DESC
+     LIMIT ?`,
+    [clientId, LIMITS.recentCampaigns]
+  );
+
+  return rows.map((row) => {
       const campaign = row as Record<string, string | number | null>;
       return {
         id: Number(campaign.id),

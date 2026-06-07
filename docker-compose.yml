@@ -1,0 +1,54 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: criativopro
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: senha
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d criativopro"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://postgres:senha@postgres:5432/criativopro
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_TEXT_MODEL: ${OPENAI_TEXT_MODEL:-gpt-5.5}
+      OPENAI_IMAGE_MODEL: ${OPENAI_IMAGE_MODEL:-gpt-image-2}
+      OPENAI_TIMEOUT_MS: ${OPENAI_TIMEOUT_MS:-120000}
+      PORT: 3333
+      PUBLIC_BASE_URL: http://localhost:3333
+      FRONTEND_ORIGIN: http://localhost:5173
+    ports:
+      - "3333:3333"
+    volumes:
+      - backend_generated:/app/backend/generated
+      - backend_uploads:/app/backend/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        VITE_API_URL: http://localhost:3333/api
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  backend_generated:
+  backend_uploads:

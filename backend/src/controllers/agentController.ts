@@ -32,42 +32,42 @@ const agentSchema = z.object({
   change_notes: z.string().optional()
 });
 
-export function listAgentsController(_req: Request, res: Response) {
-  res.json(listAgents());
+export async function listAgentsController(_req: Request, res: Response) {
+  res.json(await listAgents());
 }
 
-export function getAgentController(req: Request, res: Response) {
-  const agent = getAgent(Number(req.params.id));
+export async function getAgentController(req: Request, res: Response) {
+  const agent = await getAgent(Number(req.params.id));
   if (!agent) throw new AppError("Agente nao encontrado.", 404);
   res.json(agent);
 }
 
-export function createAgentController(req: Request, res: Response) {
+export async function createAgentController(req: Request, res: Response) {
   const parsed = agentSchema.safeParse(req.body);
   if (!parsed.success) throw new AppError(parsed.error.errors[0]?.message ?? "Revise o agente.", 422);
-  res.status(201).json(createAgent(normalizeAgentPayload(parsed.data)));
+  res.status(201).json(await createAgent(normalizeAgentPayload(parsed.data)));
 }
 
-export function updateAgentController(req: Request, res: Response) {
+export async function updateAgentController(req: Request, res: Response) {
   const parsed = agentSchema.safeParse(req.body);
   if (!parsed.success) throw new AppError(parsed.error.errors[0]?.message ?? "Revise o agente.", 422);
-  res.json(updateAgent(Number(req.params.id), normalizeAgentPayload(parsed.data)));
+  res.json(await updateAgent(Number(req.params.id), normalizeAgentPayload(parsed.data)));
 }
 
-export function duplicateAgentController(req: Request, res: Response) {
-  res.status(201).json(duplicateAgent(Number(req.params.id)));
+export async function duplicateAgentController(req: Request, res: Response) {
+  res.status(201).json(await duplicateAgent(Number(req.params.id)));
 }
 
-export function restoreAgentVersionController(req: Request, res: Response) {
-  res.json(restoreAgentVersion(Number(req.params.id), Number(req.params.versionId)));
+export async function restoreAgentVersionController(req: Request, res: Response) {
+  res.json(await restoreAgentVersion(Number(req.params.id), Number(req.params.versionId)));
 }
 
-export function compareAgentVersionController(req: Request, res: Response) {
-  res.json(compareAgentVersion(Number(req.params.id), Number(req.params.versionId)));
+export async function compareAgentVersionController(req: Request, res: Response) {
+  res.json(await compareAgentVersion(Number(req.params.id), Number(req.params.versionId)));
 }
 
-export function getAgentLogsController(req: Request, res: Response) {
-  res.json(getAgentLogs(Number(req.params.id), 100));
+export async function getAgentLogsController(req: Request, res: Response) {
+  res.json(await getAgentLogs(Number(req.params.id), 100));
 }
 
 export async function testAgentController(req: Request, res: Response) {
@@ -85,14 +85,14 @@ export async function testAgentController(req: Request, res: Response) {
   if (parsed.data.context_json?.trim()) {
     context = JSON.parse(parsed.data.context_json);
   } else if (parsed.data.client_id) {
-    const client = getClient(parsed.data.client_id);
+    const client = await getClient(parsed.data.client_id);
     if (!client) throw new AppError("Cliente nao encontrado.", 404);
     const input: NewCampaignInput = {
       client_id: parsed.data.client_id,
       free_briefing: parsed.data.briefing,
       formato: "1:1"
     };
-    context = normalizeBriefing(input, client as ClientProfile, listClientAssets(parsed.data.client_id));
+    context = await normalizeBriefing(input, client as ClientProfile, await listClientAssets(parsed.data.client_id));
   }
 
   res.json(await testAgent(Number(req.params.id), context, parsed.data.client_id ?? null));
@@ -105,6 +105,6 @@ function normalizeAgentPayload(payload: z.infer<typeof agentSchema>) {
     role: payload.role ?? null,
     temperature: payload.temperature ?? null,
     max_tokens: payload.max_tokens ?? null,
-    is_active: payload.is_active ? 1 : 0
+    is_active: payload.is_active ? true : false
   };
 }

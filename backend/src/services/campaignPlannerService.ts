@@ -1,4 +1,4 @@
-import { db } from "../db/connection.js";
+import { all, get, run } from "../db/connection.js";
 import type { CampaignFormat } from "../types.js";
 import { createCampaign, setCampaignCreativeStatus } from "./campaignService.js";
 import { getClient } from "./clientService.js";
@@ -32,10 +32,9 @@ interface PlanInput {
 const variations = ["emocional", "oportunidade", "autoridade", "promocional", "educativo", "sazonal", "institucional"];
 let running = 0;
 
-export function listPlans() {
-  return db
-    .prepare(
-      `SELECT p.*, COUNT(DISTINCT pc.client_id) AS clients_count,
+export async function listPlans() {
+  return all(
+    `SELECT p.*, COUNT(DISTINCT pc.client_id) AS clients_count,
               COUNT(q.id) AS queue_count,
               SUM(CASE WHEN q.status = 'completed' THEN 1 ELSE 0 END) AS completed_count
        FROM campaign_plans p
@@ -43,39 +42,35 @@ export function listPlans() {
        LEFT JOIN campaign_generation_queue q ON q.campaign_plan_id = p.id
        GROUP BY p.id
        ORDER BY p.created_at DESC`
-    )
-    .all();
+  );
 }
 
-export function getPlan(id: number) {
-  const plan = db.prepare("SELECT * FROM campaign_plans WHERE id = ?").get(id) as Record<string, unknown> | undefined;
+export async function getPlan(id: number) {
+  const plan = await get<Record<string, unknown>>("SELECT * FROM campaign_plans WHERE id = ?", [id]);
   if (!plan) return null;
   return {
     ...plan,
-    clients: db
-      .prepare(
-        `SELECT pc.*, c.name, c.segment
+    clients: await all(
+      `SELECT pc.*, c.name, c.segment
          FROM campaign_plan_clients pc
          JOIN clients c ON c.id = pc.client_id
          WHERE pc.campaign_plan_id = ?
-         ORDER BY c.name`
-      )
-      .all(id),
-    queue: listQueue({ planId: id }),
-    logs: listGenerationLogs({ planId: id })
+         ORDER BY c.name`,
+      [id]
+    ),
+    queue: await listQueue({ planId: id }),
+    logs: await listGenerationLogs({ planId: id })
   };
 }
 
-export function createPlan(input: PlanInput) {
-  const result = db
-    .prepare(
-      `INSERT INTO campaign_plans (
+export async function createPlan(input: PlanInput) {
+  const result = await run(
+    `INSERT INTO campaign_plans (
         name, theme, strategic_description, objective, start_date, end_date, recurrence_type,
         recurrence_days_json, preferred_time, ads_per_client, ad_format, max_ads_per_day,
         max_ads_per_hour, min_interval_minutes, approval_mode, variation_mode, status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    )
-    .run(
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
       input.name,
       input.theme,
       input.strategic_description ?? null,
@@ -93,202 +88,191 @@ export function createPlan(input: PlanInput) {
       input.approval_mode,
       input.variation_mode,
       input.status
-    );
+    ]
+  );
   const id = Number(result.lastInsertRowid);
-  savePlanClients(id, input.clients, input.ads_per_client);
-  if (input.status === "active") activatePlan(id);
+  await savePlanClients(id, input.clients, input.ads_per_client);
+  if (input.status === "active") await activatePlan(id);
   return getPlan(id);
 }
 
-export function updatePlan(id: number, input: PlanInput) {
-  db.prepare(
+export async function updatePlan(id: number, input: PlanInput) {
+  await run(
     `UPDATE campaign_plans SET
       name = ?, theme = ?, strategic_description = ?, objective = ?, start_date = ?, end_date = ?,
       recurrence_type = ?, recurrence_days_json = ?, preferred_time = ?, ads_per_client = ?,
       ad_format = ?, max_ads_per_day = ?, max_ads_per_hour = ?, min_interval_minutes = ?,
       approval_mode = ?, variation_mode = ?, status = ?, updated_at = CURRENT_TIMESTAMP
-     WHERE id = ?`
-  ).run(
-    input.name,
-    input.theme,
-    input.strategic_description ?? null,
-    input.objective,
-    input.start_date,
-    input.end_date,
-    input.recurrence_type,
-    JSON.stringify(input.recurrence_days ?? []),
-    input.preferred_time ?? null,
-    input.ads_per_client,
-    input.ad_format,
-    input.max_ads_per_day,
-    input.max_ads_per_hour,
-    input.min_interval_minutes,
-    input.approval_mode,
-    input.variation_mode,
-    input.status,
-    id
+     WHERE id = ?`,
+    [
+      input.name,
+      input.theme,
+      input.strategic_description ?? null,
+      input.objective,
+      input.start_date,
+      input.end_date,
+      input.recurrence_type,
+      JSON.stringify(input.recurrence_days ?? []),
+      input.preferred_time ?? null,
+      input.ads_per_client,
+      input.ad_format,
+      input.max_ads_per_day,
+      input.max_ads_per_hour,
+      input.min_interval_minutes,
+      input.approval_mode,
+      input.variation_mode,
+      input.status,
+      id
+    ]
   );
-  db.prepare("DELETE FROM campaign_plan_clients WHERE campaign_plan_id = ?").run(id);
-  savePlanClients(id, input.clients, input.ads_per_client);
+  await run("DELETE FROM campaign_plan_clients WHERE campaign_plan_id = ?", [id]);
+  await savePlanClients(id, input.clients, input.ads_per_client);
   return getPlan(id);
 }
 
-export function activatePlan(id: number) {
-  const plan = db.prepare("SELECT * FROM campaign_plans WHERE id = ?").get(id) as PlannerPlan | undefined;
+export async function activatePlan(id: number) {
+  const plan = await get<PlannerPlan>("SELECT * FROM campaign_plans WHERE id = ?", [id]);
   if (!plan) throw new Error("Planejamento nao encontrado.");
-  db.prepare("UPDATE campaign_plans SET status = 'active', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(id);
-  const existing = db.prepare("SELECT COUNT(*) AS total FROM campaign_generation_queue WHERE campaign_plan_id = ?").get(id) as { total: number };
-  if (existing.total === 0) createQueueForPlan(plan);
-  logPlan(null, id, null, "active", "Planejamento ativado e fila criada.");
+  await run("UPDATE campaign_plans SET status = 'active', updated_at = CURRENT_TIMESTAMP WHERE id = ?", [id]);
+  const existing = await get<{ total: number }>("SELECT COUNT(*) AS total FROM campaign_generation_queue WHERE campaign_plan_id = ?", [id]);
+  if (Number(existing?.total ?? 0) === 0) await createQueueForPlan(plan);
+  await logPlan(null, id, null, "active", "Planejamento ativado e fila criada.");
   return getPlan(id);
 }
 
-export function pausePlan(id: number) {
-  db.prepare("UPDATE campaign_plans SET status = 'paused', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(id);
-  logPlan(null, id, null, "paused", "Planejamento pausado.");
+export async function pausePlan(id: number) {
+  await run("UPDATE campaign_plans SET status = 'paused', updated_at = CURRENT_TIMESTAMP WHERE id = ?", [id]);
+  await logPlan(null, id, null, "paused", "Planejamento pausado.");
   return getPlan(id);
 }
 
-export function resumePlan(id: number) {
-  db.prepare("UPDATE campaign_plans SET status = 'active', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(id);
-  logPlan(null, id, null, "active", "Planejamento retomado.");
+export async function resumePlan(id: number) {
+  await run("UPDATE campaign_plans SET status = 'active', updated_at = CURRENT_TIMESTAMP WHERE id = ?", [id]);
+  await logPlan(null, id, null, "active", "Planejamento retomado.");
   return getPlan(id);
 }
 
-export function cancelPending(id: number) {
-  db.prepare("UPDATE campaign_generation_queue SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE campaign_plan_id = ? AND status = 'pending'").run(id);
-  logPlan(null, id, null, "cancelled", "Itens pendentes cancelados.");
+export async function cancelPending(id: number) {
+  await run("UPDATE campaign_generation_queue SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE campaign_plan_id = ? AND status = 'pending'", [id]);
+  await logPlan(null, id, null, "cancelled", "Itens pendentes cancelados.");
   return getPlan(id);
 }
 
-export function retryFailures(id: number) {
-  db.prepare(
-    "UPDATE campaign_generation_queue SET status = 'pending', error_message = NULL, scheduled_at = datetime('now'), updated_at = CURRENT_TIMESTAMP WHERE campaign_plan_id = ? AND status = 'failed'"
-  ).run(id);
-  logPlan(null, id, null, "retry", "Falhas reenfileiradas.");
+export async function retryFailures(id: number) {
+  await run("UPDATE campaign_generation_queue SET status = 'pending', error_message = NULL, scheduled_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE campaign_plan_id = ? AND status = 'failed'", [id]);
+  await logPlan(null, id, null, "retry", "Falhas reenfileiradas.");
   return getPlan(id);
 }
 
-export function generateNow(id: number) {
-  db.prepare("UPDATE campaign_generation_queue SET scheduled_at = datetime('now'), updated_at = CURRENT_TIMESTAMP WHERE campaign_plan_id = ? AND status = 'pending'").run(id);
-  logPlan(null, id, null, "generate_now", "Itens pendentes reagendados para agora.");
+export async function generateNow(id: number) {
+  await run("UPDATE campaign_generation_queue SET scheduled_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE campaign_plan_id = ? AND status = 'pending'", [id]);
+  await logPlan(null, id, null, "generate_now", "Itens pendentes reagendados para agora.");
   return getPlan(id);
 }
 
-export function reprocessQueueItem(id: number) {
-  db.prepare(
-    "UPDATE campaign_generation_queue SET status = 'pending', scheduled_at = datetime('now'), error_message = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?"
-  ).run(id);
-  return db.prepare("SELECT * FROM campaign_generation_queue WHERE id = ?").get(id);
+export async function reprocessQueueItem(id: number) {
+  await run("UPDATE campaign_generation_queue SET status = 'pending', scheduled_at = CURRENT_TIMESTAMP, error_message = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?", [id]);
+  return get("SELECT * FROM campaign_generation_queue WHERE id = ?", [id]);
 }
 
-export function listQueue(filters?: { planId?: number }) {
+export async function listQueue(filters?: { planId?: number }) {
   if (filters?.planId) {
-    return db
-      .prepare(
-        `SELECT q.*, c.name AS client_name, p.theme, p.name AS plan_name
+    return all(
+      `SELECT q.*, c.name AS client_name, p.theme, p.name AS plan_name
          FROM campaign_generation_queue q
          JOIN clients c ON c.id = q.client_id
          JOIN campaign_plans p ON p.id = q.campaign_plan_id
          WHERE q.campaign_plan_id = ?
-         ORDER BY datetime(q.scheduled_at) ASC`
-      )
-      .all(filters.planId);
+         ORDER BY q.scheduled_at ASC`,
+      [filters.planId]
+    );
   }
-  return db
-    .prepare(
-      `SELECT q.*, c.name AS client_name, p.theme, p.name AS plan_name
+  return all(
+    `SELECT q.*, c.name AS client_name, p.theme, p.name AS plan_name
        FROM campaign_generation_queue q
        JOIN clients c ON c.id = q.client_id
        JOIN campaign_plans p ON p.id = q.campaign_plan_id
-       ORDER BY datetime(q.scheduled_at) ASC
+       ORDER BY q.scheduled_at ASC
        LIMIT 300`
-    )
-    .all();
+  );
 }
 
-export function listGenerationLogs(filters?: { planId?: number }) {
+export async function listGenerationLogs(filters?: { planId?: number }) {
   if (filters?.planId) {
-    return db.prepare("SELECT * FROM campaign_generation_logs WHERE campaign_plan_id = ? ORDER BY created_at DESC LIMIT 200").all(filters.planId);
+    return all("SELECT * FROM campaign_generation_logs WHERE campaign_plan_id = ? ORDER BY created_at DESC LIMIT 200", [filters.planId]);
   }
-  return db.prepare("SELECT * FROM campaign_generation_logs ORDER BY created_at DESC LIMIT 300").all();
+  return all("SELECT * FROM campaign_generation_logs ORDER BY created_at DESC LIMIT 300");
 }
 
 export async function processDueQueue() {
-  const settings = getSettings();
+  const settings = await getSettings();
   if (settings.queue_worker_enabled !== "true") return;
-  recoverStaleProcessingItems();
+  await recoverStaleProcessingItems();
   const maxConcurrent = Number(settings.max_concurrent_generations ?? 1);
-  const processingInDatabase = db
-    .prepare("SELECT COUNT(*) AS total FROM campaign_generation_queue WHERE status = 'processing'")
-    .get() as { total: number };
-  const slots = Math.max(0, maxConcurrent - Math.max(running, processingInDatabase.total));
+  const processingInDatabase = await get<{ total: number }>("SELECT COUNT(*) AS total FROM campaign_generation_queue WHERE status = 'processing'");
+  const slots = Math.max(0, maxConcurrent - Math.max(running, Number(processingInDatabase?.total ?? 0)));
   if (slots <= 0) return;
 
-  const items = db
-    .prepare(
-      `SELECT q.*
+  const items = await all<QueueItem>(
+    `SELECT q.*
        FROM campaign_generation_queue q
        JOIN campaign_plans p ON p.id = q.campaign_plan_id
        WHERE q.status = 'pending'
-         AND datetime(q.scheduled_at) <= datetime('now')
+         AND q.scheduled_at <= CURRENT_TIMESTAMP
          AND p.status = 'active'
-       ORDER BY q.priority ASC, datetime(q.scheduled_at) ASC
-       LIMIT ?`
-    )
-    .all(slots) as QueueItem[];
+       ORDER BY q.priority ASC, q.scheduled_at ASC
+       LIMIT ?`,
+    [slots]
+  );
 
   await Promise.all(items.map((item) => processQueueItem(item)));
 }
 
-function recoverStaleProcessingItems() {
-  const staleItems = db
-    .prepare(
-      `SELECT id, campaign_plan_id, client_id
+async function recoverStaleProcessingItems() {
+  const staleItems = await all<{ id: number; campaign_plan_id: number; client_id: number }>(
+    `SELECT id, campaign_plan_id, client_id
        FROM campaign_generation_queue
        WHERE status = 'processing'
-         AND datetime(started_at) <= datetime('now', '-10 minutes')`
-    )
-    .all() as Array<{ id: number; campaign_plan_id: number; client_id: number }>;
+         AND started_at <= CURRENT_TIMESTAMP - INTERVAL '10 minutes'`
+  );
 
   if (staleItems.length === 0) return;
 
-  const update = db.prepare(
-    `UPDATE campaign_generation_queue
-     SET status = 'pending',
-         error_message = 'Processamento anterior expirou e foi reenfileirado automaticamente.',
-         scheduled_at = datetime('now'),
-         updated_at = CURRENT_TIMESTAMP
-     WHERE id = ?`
-  );
-
-  staleItems.forEach((item) => {
-    update.run(item.id);
-    logPlan(item.id, item.campaign_plan_id, item.client_id, "retry", "Item em processamento expirado reenfileirado automaticamente.");
-  });
+  await Promise.all(staleItems.map(async (item) => {
+    await run(
+      `UPDATE campaign_generation_queue
+       SET status = 'pending',
+           error_message = 'Processamento anterior expirou e foi reenfileirado automaticamente.',
+           scheduled_at = CURRENT_TIMESTAMP,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+      [item.id]
+    );
+    await logPlan(item.id, item.campaign_plan_id, item.client_id, "retry", "Item em processamento expirado reenfileirado automaticamente.");
+  }));
 }
 
 async function processQueueItem(item: QueueItem) {
   running += 1;
   const started = new Date().toISOString();
   try {
-    db.prepare("UPDATE campaign_generation_queue SET status = 'processing', started_at = ?, attempt_count = attempt_count + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(
+    await run("UPDATE campaign_generation_queue SET status = 'processing', started_at = ?, attempt_count = attempt_count + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?", [
       started,
       item.id
-    );
-    const plan = db.prepare("SELECT * FROM campaign_plans WHERE id = ?").get(item.campaign_plan_id) as PlannerPlan;
-    const client = getClient(item.client_id);
+    ]);
+    const plan = await get<PlannerPlan>("SELECT * FROM campaign_plans WHERE id = ?", [item.campaign_plan_id]);
+    if (!plan) throw new Error("Planejamento nao encontrado.");
+    const client = await getClient(item.client_id);
     if (!client) throw new Error("Cliente nao encontrado.");
 
-    const history = db
-      .prepare(
-        `SELECT strategist_output_json, creative_output_json, created_at
+    const history = await all(
+      `SELECT strategist_output_json, creative_output_json, created_at
          FROM campaigns
          WHERE client_id = ? AND free_briefing LIKE ?
          ORDER BY created_at DESC
-         LIMIT 8`
-      )
-      .all(item.client_id, `%${plan.theme}%`);
+         LIMIT 8`,
+      [item.client_id, `%${plan.theme}%`]
+    );
 
     const campaign = await createCampaign(
       {
@@ -309,56 +293,61 @@ async function processQueueItem(item: QueueItem) {
 
     if (!campaign) throw new Error("Campanha nao retornada.");
     const creativeStatus = plan.approval_mode === "draft" ? "draft" : plan.approval_mode === "approved" ? "approved" : "waiting_review";
-    setCampaignCreativeStatus(campaign.id, creativeStatus);
-    db.prepare(
-      "UPDATE campaign_generation_queue SET status = 'completed', finished_at = ?, generated_campaign_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?"
-    ).run(new Date().toISOString(), campaign.id, item.id);
-    logPlan(item.id, item.campaign_plan_id, item.client_id, "completed", "Campanha gerada com sucesso.", { campaign_id: campaign.id });
-    completePlanIfDone(item.campaign_plan_id);
+    await setCampaignCreativeStatus(campaign.id, creativeStatus);
+    await run("UPDATE campaign_generation_queue SET status = 'completed', finished_at = ?, generated_campaign_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", [
+      new Date().toISOString(),
+      campaign.id,
+      item.id
+    ]);
+    await logPlan(item.id, item.campaign_plan_id, item.client_id, "completed", "Campanha gerada com sucesso.", { campaign_id: campaign.id });
+    await completePlanIfDone(item.campaign_plan_id);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erro ao processar fila.";
-    const current = db.prepare("SELECT attempt_count, max_attempts FROM campaign_generation_queue WHERE id = ?").get(item.id) as {
-      attempt_count: number;
-      max_attempts: number;
-    };
+    const current = (await get<{ attempt_count: number; max_attempts: number }>(
+      "SELECT attempt_count, max_attempts FROM campaign_generation_queue WHERE id = ?",
+      [item.id]
+    )) ?? { attempt_count: item.attempt_count + 1, max_attempts: item.max_attempts };
     const failed = current.attempt_count >= current.max_attempts;
     const delay = Math.pow(2, Math.max(0, current.attempt_count - 1)) * 5;
-    db.prepare(
+    await run(
       `UPDATE campaign_generation_queue
-       SET status = ?, error_message = ?, scheduled_at = datetime('now', ?), finished_at = ?, updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?`
-    ).run(failed ? "failed" : "pending", message, `+${delay} minutes`, failed ? new Date().toISOString() : null, item.id);
-    logPlan(item.id, item.campaign_plan_id, item.client_id, failed ? "failed" : "retry", message, { next_retry_minutes: failed ? null : delay });
+       SET status = ?, error_message = ?, scheduled_at = CURRENT_TIMESTAMP + ?::interval, finished_at = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+      [failed ? "failed" : "pending", message, `${delay} minutes`, failed ? new Date().toISOString() : null, item.id]
+    );
+    await logPlan(item.id, item.campaign_plan_id, item.client_id, failed ? "failed" : "retry", message, { next_retry_minutes: failed ? null : delay });
     if (failed) sendQueueFailedAsync(item.id, error);
   } finally {
     running -= 1;
   }
 }
 
-function savePlanClients(planId: number, clients: PlanInput["clients"], defaultQuantity: number) {
-  const stmt = db.prepare("INSERT INTO campaign_plan_clients (campaign_plan_id, client_id, ads_quantity) VALUES (?, ?, ?)");
-  clients.forEach((item) => stmt.run(planId, item.client_id, item.ads_quantity || defaultQuantity));
+async function savePlanClients(planId: number, clients: PlanInput["clients"], defaultQuantity: number) {
+  await Promise.all(clients.map((item) => run(
+    "INSERT INTO campaign_plan_clients (campaign_plan_id, client_id, ads_quantity) VALUES (?, ?, ?)",
+    [planId, item.client_id, item.ads_quantity || defaultQuantity]
+  )));
 }
 
-function createQueueForPlan(plan: PlannerPlan) {
-  const clients = db.prepare("SELECT * FROM campaign_plan_clients WHERE campaign_plan_id = ?").all(plan.id) as Array<{
+async function createQueueForPlan(plan: PlannerPlan) {
+  const clients = await all<{
     client_id: number;
     ads_quantity: number;
-  }>;
+  }>("SELECT * FROM campaign_plan_clients WHERE campaign_plan_id = ?", [plan.id]);
   const schedule = buildSchedule(plan, clients.reduce((sum, item) => sum + item.ads_quantity, 0));
-  const retryAttempts = Number(getSettings().default_retry_attempts ?? 3);
-  const stmt = db.prepare(
-    `INSERT INTO campaign_generation_queue (
-      campaign_plan_id, client_id, scheduled_at, priority, max_attempts, variation_type
-    ) VALUES (?, ?, ?, ?, ?, ?)`
-  );
+  const retryAttempts = Number((await getSettings()).default_retry_attempts ?? 3);
   let index = 0;
-  clients.forEach((client) => {
+  for (const client of clients) {
     for (let i = 0; i < client.ads_quantity; i += 1) {
-      stmt.run(plan.id, client.client_id, schedule[index]?.toISOString() ?? new Date().toISOString(), 5, retryAttempts, variations[index % variations.length]);
+      await run(
+        `INSERT INTO campaign_generation_queue (
+          campaign_plan_id, client_id, scheduled_at, priority, max_attempts, variation_type
+        ) VALUES (?, ?, ?, ?, ?, ?)`,
+        [plan.id, client.client_id, schedule[index]?.toISOString() ?? new Date().toISOString(), 5, retryAttempts, variations[index % variations.length]]
+      );
       index += 1;
     }
-  });
+  }
 }
 
 function buildSchedule(plan: PlannerPlan, total: number) {
@@ -411,21 +400,24 @@ function buildAutoBriefing(plan: PlannerPlan, item: QueueItem, history: unknown[
   ].join("\n");
 }
 
-function getSettings() {
-  return Object.fromEntries(db.prepare("SELECT key, value FROM app_settings").all().map((row) => [(row as { key: string; value: string }).key, (row as { key: string; value: string }).value]));
+async function getSettings() {
+  return Object.fromEntries((await all<{ key: string; value: string }>("SELECT key, value FROM app_settings")).map((row) => [row.key, row.value]));
 }
 
-function logPlan(queueId: number | null, planId: number | null, clientId: number | null, status: string, message: string, metadata?: unknown) {
-  db.prepare(
-    "INSERT INTO campaign_generation_logs (queue_id, campaign_plan_id, client_id, status, message, metadata_json) VALUES (?, ?, ?, ?, ?, ?)"
-  ).run(queueId, planId, clientId, status, message, metadata ? JSON.stringify(metadata) : null);
+async function logPlan(queueId: number | null, planId: number | null, clientId: number | null, status: string, message: string, metadata?: unknown) {
+  await run("INSERT INTO campaign_generation_logs (queue_id, campaign_plan_id, client_id, status, message, metadata_json) VALUES (?, ?, ?, ?, ?, ?)", [
+    queueId,
+    planId,
+    clientId,
+    status,
+    message,
+    metadata ? JSON.stringify(metadata) : null
+  ]);
 }
 
-function completePlanIfDone(planId: number) {
-  const pending = db
-    .prepare("SELECT COUNT(*) AS total FROM campaign_generation_queue WHERE campaign_plan_id = ? AND status IN ('pending', 'processing')")
-    .get(planId) as { total: number };
-  if (pending.total === 0) db.prepare("UPDATE campaign_plans SET status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(planId);
+async function completePlanIfDone(planId: number) {
+  const pending = await get<{ total: number }>("SELECT COUNT(*) AS total FROM campaign_generation_queue WHERE campaign_plan_id = ? AND status IN ('pending', 'processing')", [planId]);
+  if (Number(pending?.total ?? 0) === 0) await run("UPDATE campaign_plans SET status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = ?", [planId]);
 }
 
 function safeArray(value: string | null) {

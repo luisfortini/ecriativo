@@ -2,12 +2,11 @@ import cors from "cors";
 import express from "express";
 import path from "node:path";
 import { config } from "./config.js";
+import { databaseHealth } from "./db/connection.js";
 import { migrate } from "./db/migrate.js";
 import { campaignRoutes } from "./routes/campaignRoutes.js";
 import { startQueueWorker } from "./services/queueWorker.js";
 import { errorHandler } from "./utils/errors.js";
-
-migrate();
 
 const app = express();
 
@@ -23,11 +22,26 @@ app.get("/api/health", (_req, res) => {
   });
 });
 
+app.get("/health/database", async (_req, res, next) => {
+  try {
+    res.json(await databaseHealth());
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.use("/api", campaignRoutes);
 app.use(errorHandler);
 
-app.listen(config.port, () => {
-  console.log(`e-Criativo API em http://localhost:${config.port}`);
-});
+async function bootstrap() {
+  await migrate();
+  app.listen(config.port, () => {
+    console.log(`e-Criativo API em http://localhost:${config.port}`);
+  });
+  startQueueWorker();
+}
 
-startQueueWorker();
+void bootstrap().catch((error) => {
+  console.error("Falha ao iniciar API", error);
+  process.exit(1);
+});

@@ -1,4 +1,4 @@
-import { db } from "../db/connection.js";
+import { all as dbAll, get, run } from "../db/connection.js";
 
 export type AiOperationType =
   | "normalizacao_briefing"
@@ -31,12 +31,12 @@ interface UsageInput {
   createdAt?: string;
 }
 
-export function recordAiUsage(input: UsageInput) {
+export async function recordAiUsage(input: UsageInput) {
   const inputTokens = input.inputTokens ?? 0;
   const outputTokens = input.outputTokens ?? 0;
   const totalTokens = inputTokens + outputTokens;
   const imageCount = input.imageCount ?? 0;
-  const price = getActiveModelPrice(input.model);
+  const price = await getActiveModelPrice(input.model);
   const inputCost = (inputTokens / 1_000_000) * price.input_price_per_1m_tokens;
   const outputCost = (outputTokens / 1_000_000) * price.output_price_per_1m_tokens;
   const imageCost = imageCount * price.image_price;
@@ -50,9 +50,8 @@ export function recordAiUsage(input: UsageInput) {
     currency: price.currency
   });
 
-  const result = db
-    .prepare(
-      `INSERT INTO ai_usage_logs (
+  const result = await run(
+    `INSERT INTO ai_usage_logs (
         client_id, campaign_id, campaign_plan_id, queue_id, agent_id, agent_key, model,
         operation_type, status, input_tokens, output_tokens, total_tokens,
         input_cost, output_cost, total_cost, image_count, image_cost,
@@ -64,9 +63,8 @@ export function recordAiUsage(input: UsageInput) {
         @inputCost, @outputCost, @totalCost, @imageCount, @imageCost,
         @totalEstimatedCost, @contextCharacters, @latencyMs, @errorMessage,
         @metadataJson, @priceSnapshot, @sourceLogId, COALESCE(@createdAt, CURRENT_TIMESTAMP)
-      )`
-    )
-    .run({
+      )`,
+    {
       clientId: input.clientId ?? null,
       campaignId: input.campaignId ?? null,
       campaignPlanId: input.campaignPlanId ?? null,
@@ -92,23 +90,23 @@ export function recordAiUsage(input: UsageInput) {
       priceSnapshot,
       sourceLogId: input.sourceLogId ?? null,
       createdAt: input.createdAt ?? null
-    });
+    }
+  );
 
   return Number(result.lastInsertRowid);
 }
 
-export function updateAiUsageCampaign(ids: Array<number | null | undefined>, campaignId: number) {
+export async function updateAiUsageCampaign(ids: Array<number | null | undefined>, campaignId: number) {
   const valid = ids.filter((id): id is number => typeof id === "number");
   if (!valid.length) return;
-  const stmt = db.prepare("UPDATE ai_usage_logs SET campaign_id = ? WHERE id = ?");
-  valid.forEach((id) => stmt.run(campaignId, id));
+  await Promise.all(valid.map((id) => run("UPDATE ai_usage_logs SET campaign_id = ? WHERE id = ?", [campaignId, id])));
 }
 
-export function listAiModelPrices() {
-  return db.prepare("SELECT * FROM ai_model_prices ORDER BY active DESC, model ASC").all();
+export async function listAiModelPrices() {
+  return dbAll("SELECT * FROM ai_model_prices ORDER BY active DESC, model ASC");
 }
 
-export function upsertAiModelPrice(input: Record<string, unknown>) {
+export async function upsertAiModelPrice(input: Record<string, unknown>) {
   const id = Number(input.id ?? 0);
   const payload = {
     model: String(input.model ?? "").trim(),
@@ -120,14 +118,15 @@ export function upsertAiModelPrice(input: Record<string, unknown>) {
   };
   if (!payload.model) throw new Error("Informe o modelo.");
   if (id) {
-    db.prepare(
+    await run(
       `UPDATE ai_model_prices
        SET model = ?, input_price_per_1m_tokens = ?, output_price_per_1m_tokens = ?,
            image_price = ?, currency = ?, active = ?, updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?`
-    ).run(payload.model, payload.input, payload.output, payload.image, payload.currency, payload.active, id);
+       WHERE id = ?`,
+      [payload.model, payload.input, payload.output, payload.image, payload.currency, Boolean(payload.active), id]
+    );
   } else {
-    db.prepare(
+    await run(
       `INSERT INTO ai_model_prices (
         model, input_price_per_1m_tokens, output_price_per_1m_tokens, image_price, currency, active
       ) VALUES (?, ?, ?, ?, ?, ?)
@@ -137,13 +136,14 @@ export function upsertAiModelPrice(input: Record<string, unknown>) {
         image_price = excluded.image_price,
         currency = excluded.currency,
         active = excluded.active,
-        updated_at = CURRENT_TIMESTAMP`
-    ).run(payload.model, payload.input, payload.output, payload.image, payload.currency, payload.active);
+        updated_at = CURRENT_TIMESTAMP`,
+      [payload.model, payload.input, payload.output, payload.image, payload.currency, Boolean(payload.active)]
+    );
   }
   return listAiModelPrices();
 }
 
-export function getAiCostSettings() {
+export async function getAiCostSettings() {
   const keys = [
     "ai_default_currency",
     "ai_cost_max_per_campaign",
@@ -151,26 +151,28 @@ export function getAiCostSettings() {
     "ai_cost_max_per_routine",
     "ai_cost_limit_mode"
   ];
-  const rows = db.prepare(`SELECT key, value FROM app_settings WHERE key IN (${keys.map(() => "?").join(",")})`).all(...keys) as Array<{ key: string; value: string }>;
+  const rows = await dbAll<{ key: string; value: string }>(`SELECT key, value FROM app_settings WHERE key IN (${keys.map(() => "?").join(",")})`, keys);
   return Object.fromEntries(rows.map((row) => [row.key, row.value]));
 }
 
-export function updateAiCostSettings(input: Record<string, unknown>) {
-  const allowed = getAiCostSettings();
-  const stmt = db.prepare(
-    `INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`
-  );
-  Object.keys(allowed).forEach((key) => {
-    if (input[key] !== undefined) stmt.run(key, String(input[key]));
-  });
+export async function updateAiCostSettings(input: Record<string, unknown>) {
+  const allowed = await getAiCostSettings();
+  for (const key of Object.keys(allowed)) {
+    if (input[key] !== undefined) {
+      await run(
+        `INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
+        [key, String(input[key])]
+      );
+    }
+  }
   return getAiCostSettings();
 }
 
-export function getAiCostDashboard(filters: Record<string, unknown>) {
+export async function getAiCostDashboard(filters: Record<string, unknown>) {
   const where = buildWhere(filters);
   const params = where.params;
-  const summary = one(
+  const summary = await one(
     `SELECT
        COALESCE(SUM(total_estimated_cost), 0) total_cost,
        COALESCE(SUM(input_tokens), 0) input_tokens,
@@ -189,39 +191,39 @@ export function getAiCostDashboard(filters: Record<string, unknown>) {
   const totalCost = Number(summary.total_cost ?? 0);
   const executions = Number(summary.executions ?? 0);
 
-  const topClient = one(
+  const topClient = await one(
     `SELECT c.id, c.name, SUM(u.total_estimated_cost) total_cost
      FROM ai_usage_logs u LEFT JOIN clients c ON c.id = u.client_id ${where.sql}
      GROUP BY c.id ORDER BY total_cost DESC LIMIT 1`,
     params
   );
-  const topAgent = one(
+  const topAgent = await one(
     `SELECT u.agent_key, a.name, SUM(u.total_estimated_cost) total_cost
      FROM ai_usage_logs u LEFT JOIN agents a ON a.id = u.agent_id ${where.sql}
      GROUP BY u.agent_key, a.name ORDER BY total_cost DESC LIMIT 1`,
     params
   );
-  const largestExecution = one(`SELECT id, total_tokens, total_estimated_cost FROM ai_usage_logs u ${where.sql} ORDER BY total_tokens DESC LIMIT 1`, params);
+  const largestExecution = await one(`SELECT id, total_tokens, total_estimated_cost FROM ai_usage_logs u ${where.sql} ORDER BY total_tokens DESC LIMIT 1`, params);
 
   const groups = {
-    costByDay: all(`SELECT substr(created_at,1,10) label, SUM(total_estimated_cost) value, SUM(total_tokens) tokens FROM ai_usage_logs u ${where.sql} GROUP BY label ORDER BY label`, params),
-    costByClient: all(`SELECT COALESCE(c.name, 'Sem cliente') label, SUM(u.total_estimated_cost) value FROM ai_usage_logs u LEFT JOIN clients c ON c.id = u.client_id ${where.sql} GROUP BY label ORDER BY value DESC LIMIT 10`, params),
-    costByAgent: all(`SELECT COALESCE(a.name, u.agent_key, 'Sem agente') label, SUM(u.total_estimated_cost) value FROM ai_usage_logs u LEFT JOIN agents a ON a.id = u.agent_id ${where.sql} GROUP BY label ORDER BY value DESC LIMIT 10`, params),
-    costByModel: all(`SELECT COALESCE(model, 'Sem modelo') label, SUM(total_estimated_cost) value FROM ai_usage_logs u ${where.sql} GROUP BY label ORDER BY value DESC LIMIT 10`, params),
-    tokensByAgent: all(`SELECT COALESCE(a.name, u.agent_key, 'Sem agente') label, SUM(u.total_tokens) value FROM ai_usage_logs u LEFT JOIN agents a ON a.id = u.agent_id ${where.sql} GROUP BY label ORDER BY value DESC LIMIT 10`, params),
-    campaigns: all(`SELECT COALESCE(camp.id, u.campaign_id) label, SUM(u.total_estimated_cost) value FROM ai_usage_logs u LEFT JOIN campaigns camp ON camp.id = u.campaign_id ${whereWith(where, "u.campaign_id IS NOT NULL")} GROUP BY u.campaign_id ORDER BY value DESC LIMIT 10`, params),
-    routines: all(`SELECT COALESCE(p.name, 'Sem rotina') label, SUM(u.total_estimated_cost) value FROM ai_usage_logs u LEFT JOIN campaign_plans p ON p.id = u.campaign_plan_id ${whereWith(where, "u.campaign_plan_id IS NOT NULL")} GROUP BY u.campaign_plan_id ORDER BY value DESC LIMIT 10`, params)
+    costByDay: await all(`SELECT created_at::date::text label, SUM(total_estimated_cost) value, SUM(total_tokens) tokens FROM ai_usage_logs u ${where.sql} GROUP BY label ORDER BY label`, params),
+    costByClient: await all(`SELECT COALESCE(c.name, 'Sem cliente') label, SUM(u.total_estimated_cost) value FROM ai_usage_logs u LEFT JOIN clients c ON c.id = u.client_id ${where.sql} GROUP BY label ORDER BY value DESC LIMIT 10`, params),
+    costByAgent: await all(`SELECT COALESCE(a.name, u.agent_key, 'Sem agente') label, SUM(u.total_estimated_cost) value FROM ai_usage_logs u LEFT JOIN agents a ON a.id = u.agent_id ${where.sql} GROUP BY label ORDER BY value DESC LIMIT 10`, params),
+    costByModel: await all(`SELECT COALESCE(model, 'Sem modelo') label, SUM(total_estimated_cost) value FROM ai_usage_logs u ${where.sql} GROUP BY label ORDER BY value DESC LIMIT 10`, params),
+    tokensByAgent: await all(`SELECT COALESCE(a.name, u.agent_key, 'Sem agente') label, SUM(u.total_tokens) value FROM ai_usage_logs u LEFT JOIN agents a ON a.id = u.agent_id ${where.sql} GROUP BY label ORDER BY value DESC LIMIT 10`, params),
+    campaigns: await all(`SELECT COALESCE(camp.id::text, u.campaign_id::text) label, SUM(u.total_estimated_cost) value FROM ai_usage_logs u LEFT JOIN campaigns camp ON camp.id = u.campaign_id ${whereWith(where, "u.campaign_id IS NOT NULL")} GROUP BY u.campaign_id, camp.id ORDER BY value DESC LIMIT 10`, params),
+    routines: await all(`SELECT COALESCE(p.name, 'Sem rotina') label, SUM(u.total_estimated_cost) value FROM ai_usage_logs u LEFT JOIN campaign_plans p ON p.id = u.campaign_plan_id ${whereWith(where, "u.campaign_plan_id IS NOT NULL")} GROUP BY u.campaign_plan_id, p.name ORDER BY value DESC LIMIT 10`, params)
   };
 
   const rankings = {
-    clients: all(`SELECT c.id, c.name label, SUM(u.total_estimated_cost) total_cost, SUM(u.total_tokens) total_tokens FROM ai_usage_logs u JOIN clients c ON c.id = u.client_id ${where.sql} GROUP BY c.id ORDER BY total_cost DESC LIMIT 10`, params),
-    campaigns: all(`SELECT u.campaign_id id, COALESCE(c.cliente, 'Campanha ' || u.campaign_id) label, SUM(u.total_estimated_cost) total_cost, SUM(u.total_tokens) total_tokens FROM ai_usage_logs u LEFT JOIN campaigns c ON c.id = u.campaign_id ${whereWith(where, "u.campaign_id IS NOT NULL")} GROUP BY u.campaign_id ORDER BY total_cost DESC LIMIT 10`, params),
-    agents: all(`SELECT u.agent_id id, COALESCE(a.name, u.agent_key) label, SUM(u.total_estimated_cost) total_cost, SUM(u.total_tokens) total_tokens FROM ai_usage_logs u LEFT JOIN agents a ON a.id = u.agent_id ${where.sql} GROUP BY u.agent_id, u.agent_key ORDER BY total_cost DESC LIMIT 10`, params),
-    executions: all(`SELECT u.id, COALESCE(c.name, 'Sem cliente') client_name, u.agent_key, u.operation_type, u.total_estimated_cost, u.total_tokens, u.created_at FROM ai_usage_logs u LEFT JOIN clients c ON c.id = u.client_id ${where.sql} ORDER BY u.total_estimated_cost DESC, u.total_tokens DESC LIMIT 10`, params),
-    routines: all(`SELECT u.campaign_plan_id id, COALESCE(p.name, 'Rotina ' || u.campaign_plan_id) label, SUM(u.total_estimated_cost) total_cost, SUM(u.total_tokens) total_tokens FROM ai_usage_logs u LEFT JOIN campaign_plans p ON p.id = u.campaign_plan_id ${whereWith(where, "u.campaign_plan_id IS NOT NULL")} GROUP BY u.campaign_plan_id ORDER BY total_cost DESC LIMIT 10`, params)
+    clients: await all(`SELECT c.id, c.name label, SUM(u.total_estimated_cost) total_cost, SUM(u.total_tokens) total_tokens FROM ai_usage_logs u JOIN clients c ON c.id = u.client_id ${where.sql} GROUP BY c.id ORDER BY total_cost DESC LIMIT 10`, params),
+    campaigns: await all(`SELECT u.campaign_id id, COALESCE(c.cliente, 'Campanha ' || u.campaign_id::text) label, SUM(u.total_estimated_cost) total_cost, SUM(u.total_tokens) total_tokens FROM ai_usage_logs u LEFT JOIN campaigns c ON c.id = u.campaign_id ${whereWith(where, "u.campaign_id IS NOT NULL")} GROUP BY u.campaign_id, c.cliente ORDER BY total_cost DESC LIMIT 10`, params),
+    agents: await all(`SELECT u.agent_id id, COALESCE(a.name, u.agent_key) label, SUM(u.total_estimated_cost) total_cost, SUM(u.total_tokens) total_tokens FROM ai_usage_logs u LEFT JOIN agents a ON a.id = u.agent_id ${where.sql} GROUP BY u.agent_id, u.agent_key, a.name ORDER BY total_cost DESC LIMIT 10`, params),
+    executions: await all(`SELECT u.id, COALESCE(c.name, 'Sem cliente') client_name, u.agent_key, u.operation_type, u.total_estimated_cost, u.total_tokens, u.created_at FROM ai_usage_logs u LEFT JOIN clients c ON c.id = u.client_id ${where.sql} ORDER BY u.total_estimated_cost DESC, u.total_tokens DESC LIMIT 10`, params),
+    routines: await all(`SELECT u.campaign_plan_id id, COALESCE(p.name, 'Rotina ' || u.campaign_plan_id::text) label, SUM(u.total_estimated_cost) total_cost, SUM(u.total_tokens) total_tokens FROM ai_usage_logs u LEFT JOIN campaign_plans p ON p.id = u.campaign_plan_id ${whereWith(where, "u.campaign_plan_id IS NOT NULL")} GROUP BY u.campaign_plan_id, p.name ORDER BY total_cost DESC LIMIT 10`, params)
   };
 
-  const logs = all(
+  const logs = await all(
     `SELECT u.*, c.name client_name, a.name agent_name, p.name plan_name
      FROM ai_usage_logs u
      LEFT JOIN clients c ON c.id = u.client_id
@@ -248,27 +250,26 @@ export function getAiCostDashboard(filters: Record<string, unknown>) {
     groups,
     rankings,
     insights: buildInsights(summary, groups),
-    alerts: buildAlerts(summary, groups, rankings),
+    alerts: await buildAlerts(summary, groups, rankings),
     logs
   };
 }
 
-export function getAiUsageDetail(id: number) {
-  return db
-    .prepare(
-      `SELECT u.*, c.name client_name, camp.cliente campaign_name, a.name agent_name, p.name plan_name
+export async function getAiUsageDetail(id: number) {
+  return get(
+    `SELECT u.*, c.name client_name, camp.cliente campaign_name, a.name agent_name, p.name plan_name
        FROM ai_usage_logs u
        LEFT JOIN clients c ON c.id = u.client_id
        LEFT JOIN campaigns camp ON camp.id = u.campaign_id
        LEFT JOIN agents a ON a.id = u.agent_id
        LEFT JOIN campaign_plans p ON p.id = u.campaign_plan_id
-       WHERE u.id = ?`
-    )
-    .get(id);
+       WHERE u.id = ?`,
+    [id]
+  );
 }
 
-export function exportAiUsage(format: string, filters: Record<string, unknown>) {
-  const data = getAiCostDashboard(filters).logs as Record<string, unknown>[];
+export async function exportAiUsage(format: string, filters: Record<string, unknown>) {
+  const data = (await getAiCostDashboard(filters)).logs as Record<string, unknown>[];
   if (format === "json") return { contentType: "application/json", body: JSON.stringify(data, null, 2), filename: "ai-usage.json" };
   const headers = [
     "id",
@@ -297,10 +298,8 @@ export function exportAiUsage(format: string, filters: Record<string, unknown>) 
   };
 }
 
-function getActiveModelPrice(model?: string | null) {
-  const row = model
-    ? (db.prepare("SELECT * FROM ai_model_prices WHERE model = ? AND active = 1 ORDER BY updated_at DESC LIMIT 1").get(model) as PriceRow | undefined)
-    : undefined;
+async function getActiveModelPrice(model?: string | null) {
+  const row = model ? await get<PriceRow>("SELECT * FROM ai_model_prices WHERE model = ? AND active = TRUE ORDER BY updated_at DESC LIMIT 1", [model]) : undefined;
   return row ?? ({ input_price_per_1m_tokens: 0, output_price_per_1m_tokens: 0, image_price: 0, currency: "USD" } as PriceRow);
 }
 
@@ -318,11 +317,11 @@ function buildWhere(filters: Record<string, unknown>) {
     operation_type: "u.operation_type"
   };
   if (filters.start_date) {
-    clauses.push("date(u.created_at) >= date(?)");
+    clauses.push("u.created_at::date >= ?::date");
     params.push(filters.start_date);
   }
   if (filters.end_date) {
-    clauses.push("date(u.created_at) <= date(?)");
+    clauses.push("u.created_at::date <= ?::date");
     params.push(filters.end_date);
   }
   Object.entries(map).forEach(([key, column]) => {
@@ -336,11 +335,11 @@ function buildWhere(filters: Record<string, unknown>) {
 }
 
 function all(sql: string, params: unknown[]) {
-  return db.prepare(sql).all(...params) as Record<string, unknown>[];
+  return dbAll<Record<string, unknown>>(sql, params);
 }
 
-function one(sql: string, params: unknown[]) {
-  return (db.prepare(sql).get(...params) as Record<string, unknown> | undefined) ?? {};
+async function one(sql: string, params: unknown[]) {
+  return (await get<Record<string, unknown>>(sql, params)) ?? {};
 }
 
 function whereWith(where: { sql: string }, condition: string) {
@@ -374,11 +373,11 @@ function buildInsights(summary: Record<string, unknown>, groups: Record<string, 
   return insights;
 }
 
-function buildAlerts(summary: Record<string, unknown>, groups: Record<string, Record<string, unknown>[]>, rankings: Record<string, Record<string, unknown>[]>) {
+async function buildAlerts(summary: Record<string, unknown>, groups: Record<string, Record<string, unknown>[]>, rankings: Record<string, Record<string, unknown>[]>) {
   const alerts: string[] = [];
   if (Number(summary.excessive_context_count ?? 0) > 0) alerts.push("Execucao acima de 10k tokens de entrada ou contexto muito grande detectada.");
   if (Number(summary.error_count ?? 0) > 0) alerts.push("Ha erros recorrentes que podem consumir tokens.");
-  const settings = getAiCostSettings();
+  const settings = await getAiCostSettings();
   const routineLimit = Number(settings.ai_cost_max_per_routine ?? 0);
   if (routineLimit && (rankings.routines ?? []).some((item) => Number(item.total_cost ?? 0) > routineLimit)) alerts.push("Rotina consumindo mais que o limite configurado.");
   const clientLimit = Number(settings.ai_cost_max_per_client_month ?? 0);

@@ -38,48 +38,66 @@ const planSchema = z.object({
   clients: z.array(z.object({ client_id: z.coerce.number().int().positive(), ads_quantity: z.coerce.number().int().positive().optional() })).min(1)
 });
 
-export function listPlansController(_req: Request, res: Response) {
-  res.json(listPlans());
+export async function listPlansController(_req: Request, res: Response) {
+  res.json(await listPlans());
 }
 
-export function getPlanController(req: Request, res: Response) {
-  const plan = getPlan(Number(req.params.id));
+export async function getPlanController(req: Request, res: Response) {
+  const plan = await getPlan(Number(req.params.id));
   if (!plan) throw new AppError("Planejamento nao encontrado.", 404);
   res.json(plan);
 }
 
-export function createPlanController(req: Request, res: Response) {
+export async function createPlanController(req: Request, res: Response) {
   const parsed = planSchema.safeParse(req.body);
   if (!parsed.success) throw new AppError(parsed.error.errors[0]?.message ?? "Revise o planejamento.", 422);
-  res.status(201).json(createPlan(parsed.data));
+  res.status(201).json(await createPlan(parsed.data));
 }
 
-export function updatePlanController(req: Request, res: Response) {
+export async function updatePlanController(req: Request, res: Response) {
   const parsed = planSchema.safeParse(req.body);
   if (!parsed.success) throw new AppError(parsed.error.errors[0]?.message ?? "Revise o planejamento.", 422);
-  res.json(updatePlan(Number(req.params.id), parsed.data));
+  res.json(await updatePlan(Number(req.params.id), parsed.data));
 }
 
-export function planActionController(req: Request, res: Response) {
+export async function planActionController(req: Request, res: Response) {
   const id = Number(req.params.id);
   const action = req.params.action;
-  if (action === "activate") return res.json(activatePlan(id));
-  if (action === "pause") return res.json(pausePlan(id));
-  if (action === "resume") return res.json(resumePlan(id));
-  if (action === "cancel-pending") return res.json(cancelPending(id));
-  if (action === "retry-failures") return res.json(retryFailures(id));
-  if (action === "generate-now") return res.json(generateNow(id));
+  if (action === "activate") {
+    res.json(await activatePlan(id));
+    return;
+  }
+  if (action === "pause") {
+    res.json(await pausePlan(id));
+    return;
+  }
+  if (action === "resume") {
+    res.json(await resumePlan(id));
+    return;
+  }
+  if (action === "cancel-pending") {
+    res.json(await cancelPending(id));
+    return;
+  }
+  if (action === "retry-failures") {
+    res.json(await retryFailures(id));
+    return;
+  }
+  if (action === "generate-now") {
+    res.json(await generateNow(id));
+    return;
+  }
   throw new AppError("Acao invalida.", 404);
 }
 
-export function listQueueController(req: Request, res: Response) {
-  res.json(listQueue(req.query.plan_id ? { planId: Number(req.query.plan_id) } : undefined));
+export async function listQueueController(req: Request, res: Response) {
+  res.json(await listQueue(req.query.plan_id ? { planId: Number(req.query.plan_id) } : undefined));
 }
 
-export function reprocessQueueItemController(req: Request, res: Response) {
-  res.json(reprocessQueueItem(Number(req.params.id)));
+export async function reprocessQueueItemController(req: Request, res: Response) {
+  res.json(await reprocessQueueItem(Number(req.params.id)));
 }
 
-export function listPlannerLogsController(req: Request, res: Response) {
-  res.json(listGenerationLogs(req.query.plan_id ? { planId: Number(req.query.plan_id) } : undefined));
+export async function listPlannerLogsController(req: Request, res: Response) {
+  res.json(await listGenerationLogs(req.query.plan_id ? { planId: Number(req.query.plan_id) } : undefined));
 }

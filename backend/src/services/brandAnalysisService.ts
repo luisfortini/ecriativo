@@ -1,4 +1,4 @@
-import { db } from "../db/connection.js";
+import { all, get, run } from "../db/connection.js";
 import type { BrandAnalysisOutput, ClientAsset, ClientBrandAnalysis, ClientProfile } from "../types.js";
 import { executeAgentByKey } from "./agentService.js";
 import { getClient, listClientAssets, updateClientAssetAnalysis } from "./clientService.js";
@@ -28,12 +28,12 @@ const applyMap: Record<string, { clientField: string; analysisField: keyof Brand
 };
 
 export async function analyzeClientBrand(clientId: number, input: AnalyzeInput) {
-  const client = getClient(clientId) as (ClientProfile & { assets: ClientAsset[] }) | null;
+  const client = (await getClient(clientId)) as (ClientProfile & { assets: ClientAsset[] }) | null;
   if (!client) throw new Error("Cliente nao encontrado.");
-  persistProvidedUrls(clientId, input);
+  await persistProvidedUrls(clientId, input);
 
   const sources = await collectSources(input);
-  const assets = selectAssets(clientId, input.asset_ids);
+  const assets = await selectAssets(clientId, input.asset_ids);
   const context = {
     client,
     sources,
@@ -55,16 +55,16 @@ export async function analyzeClientBrand(clientId: number, input: AnalyzeInput) 
   };
 
   const run = await executeAgentByKey<BrandAnalysisOutput>("brand_analyzer_agent", context, { clientId });
-  const analysis = saveAnalysis(clientId, sources, assets, run.parsed);
+  const analysis = await saveAnalysis(clientId, sources, assets, run.parsed);
 
-  assets.forEach((asset) => {
+  await Promise.all(assets.map((asset) =>
     updateClientAssetAnalysis(asset.id, {
       analysis_status: "analyzed",
       ai_summary: buildAssetSummary(asset, run.parsed),
       dominant_colors_json: JSON.stringify(run.parsed.color_palette ?? []),
       visual_style_tags_json: JSON.stringify(run.parsed.approved_style_suggestions ?? [])
-    });
-  });
+    })
+  ));
 
   return {
     analysis,
@@ -73,26 +73,22 @@ export async function analyzeClientBrand(clientId: number, input: AnalyzeInput) 
   };
 }
 
-function persistProvidedUrls(clientId: number, input: AnalyzeInput) {
+async function persistProvidedUrls(clientId: number, input: AnalyzeInput) {
   const updates: Record<string, string | null | number> = { clientId };
   if (input.site_url?.trim()) updates.site_url = input.site_url.trim();
   if (input.instagram_url?.trim()) updates.instagram_url = input.instagram_url.trim();
   const keys = Object.keys(updates).filter((key) => key !== "clientId");
   if (!keys.length) return;
-  db.prepare(`UPDATE clients SET ${keys.map((key) => `${key} = @${key}`).join(", ")}, updated_at = CURRENT_TIMESTAMP WHERE id = @clientId`).run(updates);
+  await run(`UPDATE clients SET ${keys.map((key) => `${key} = @${key}`).join(", ")}, updated_at = CURRENT_TIMESTAMP WHERE id = @clientId`, updates);
 }
 
-export function getClientBrandAnalyses(clientId: number) {
-  return db
-    .prepare("SELECT * FROM client_brand_analysis WHERE client_id = ? ORDER BY created_at DESC")
-    .all(clientId) as ClientBrandAnalysis[];
+export async function getClientBrandAnalyses(clientId: number) {
+  return all<ClientBrandAnalysis>("SELECT * FROM client_brand_analysis WHERE client_id = ? ORDER BY created_at DESC", [clientId]);
 }
 
-export function applyBrandAnalysis(clientId: number, analysisId: number, input: ApplyInput) {
-  const client = getClient(clientId) as ClientProfile | null;
-  const analysis = db
-    .prepare("SELECT * FROM client_brand_analysis WHERE id = ? AND client_id = ?")
-    .get(analysisId, clientId) as ClientBrandAnalysis | undefined;
+export async function applyBrandAnalysis(clientId: number, analysisId: number, input: ApplyInput) {
+  const client = (await getClient(clientId)) as ClientProfile | null;
+  const analysis = await get<ClientBrandAnalysis>("SELECT * FROM client_brand_analysis WHERE id = ? AND client_id = ?", [analysisId, clientId]);
   if (!client || !analysis) throw new Error("Analise nao encontrada.");
 
   const output = JSON.parse(analysis.raw_ai_output_json || "{}") as BrandAnalysisOutput;
@@ -109,12 +105,12 @@ export function applyBrandAnalysis(clientId: number, analysisId: number, input: 
   if (Object.keys(updates).length === 0) return getClient(clientId);
 
   const assignments = Object.keys(updates).map((field) => `${field} = @${field}`).join(", ");
-  db.prepare(`UPDATE clients SET ${assignments}, updated_at = CURRENT_TIMESTAMP WHERE id = @clientId`).run({ ...updates, clientId });
+  await run(`UPDATE clients SET ${assignments}, updated_at = CURRENT_TIMESTAMP WHERE id = @clientId`, { ...updates, clientId });
   return getClient(clientId);
 }
 
 export async function reanalyzeClientMaterials(clientId: number) {
-  const assets = listClientAssets(clientId).filter((asset) =>
+  const assets = (await listClientAssets(clientId)).filter((asset) =>
     ["instagram_screenshot", "website_screenshot", "approved_reference", "rejected_reference", "previous_campaign", "brand_material", "approved_ad", "rejected_ad"].includes(asset.type)
   );
   return analyzeClientBrand(clientId, { asset_ids: assets.map((asset) => asset.id), manual_notes: "Reanalise de materiais cadastrados." });
@@ -179,14 +175,14 @@ function extractImages(html: string, baseUrl: string) {
   return [...images];
 }
 
-function selectAssets(clientId: number, ids?: number[]) {
-  const assets = listClientAssets(clientId);
+async function selectAssets(clientId: number, ids?: number[]) {
+  const assets = await listClientAssets(clientId);
   if (!ids?.length) return assets;
   const allowed = new Set(ids);
   return assets.filter((asset) => allowed.has(asset.id));
 }
 
-function saveAnalysis(clientId: number, sources: Awaited<ReturnType<typeof collectSources>>, assets: ClientAsset[], output: BrandAnalysisOutput) {
+async function saveAnalysis(clientId: number, sources: Awaited<ReturnType<typeof collectSources>>, assets: ClientAsset[], output: BrandAnalysisOutput) {
   const sourceType = sources.map((source) => source.type).join(",") || (assets.length ? "manual_assets" : "manual");
   const sourceUrl = sources.map((source) => source.url).filter(Boolean).join("\n") || null;
   const extractedText = sources.map((source) => `[${source.type}] ${source.text}`).join("\n\n");
@@ -195,16 +191,14 @@ function saveAnalysis(clientId: number, sources: Awaited<ReturnType<typeof colle
     uploaded_materials: assets.map((asset) => ({ id: asset.id, type: asset.type, file_url: asset.file_url, user_feedback: asset.user_feedback }))
   };
 
-  const result = db
-    .prepare(
-      `INSERT INTO client_brand_analysis (
+  const result = await run(
+    `INSERT INTO client_brand_analysis (
         client_id, source_type, source_url, extracted_text, extracted_images_json,
         suggested_brand_voice, suggested_color_palette, suggested_positioning,
         suggested_target_audience, suggested_visual_style, suggested_ctas,
         suggested_restrictions, raw_ai_output_json, status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed')`
-    )
-    .run(
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed')`,
+    [
       clientId,
       sourceType,
       sourceUrl,
@@ -217,10 +211,11 @@ function saveAnalysis(clientId: number, sources: Awaited<ReturnType<typeof colle
       output.visual_style,
       bulletList(output.common_ctas),
       bulletList(output.forbidden_style_suggestions),
-      JSON.stringify(output),
-    );
+      JSON.stringify(output)
+    ]
+  );
 
-  return db.prepare("SELECT * FROM client_brand_analysis WHERE id = ?").get(result.lastInsertRowid);
+  return get("SELECT * FROM client_brand_analysis WHERE id = ?", [result.lastInsertRowid]);
 }
 
 function buildComparison(client: ClientProfile, output: BrandAnalysisOutput) {

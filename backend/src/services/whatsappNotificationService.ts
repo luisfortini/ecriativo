@@ -1,5 +1,5 @@
 import { config } from "../config.js";
-import { db } from "../db/connection.js";
+import { get, run } from "../db/connection.js";
 import fs from "node:fs/promises";
 import fsSync from "node:fs";
 import path from "node:path";
@@ -43,28 +43,28 @@ const clientDefaults = {
   active: true
 };
 
-export function getGlobalWhatsappSettings() {
-  return { ...globalDefaults, ...getSettings("global", null) };
+export async function getGlobalWhatsappSettings() {
+  return { ...globalDefaults, ...(await getSettings("global", null)) };
 }
 
-export function updateGlobalWhatsappSettings(input: Record<string, unknown>) {
-  const next = { ...getGlobalWhatsappSettings(), ...coerceSettings(input) };
-  saveSettings("global", null, true, next);
+export async function updateGlobalWhatsappSettings(input: Record<string, unknown>) {
+  const next = { ...(await getGlobalWhatsappSettings()), ...coerceSettings(input) };
+  await saveSettings("global", null, true, next);
   return next;
 }
 
-export function getClientWhatsappSettings(clientId: number) {
-  return { ...clientDefaults, ...getSettings("client", clientId) };
+export async function getClientWhatsappSettings(clientId: number) {
+  return { ...clientDefaults, ...(await getSettings("client", clientId)) };
 }
 
-export function updateClientWhatsappSettings(clientId: number, input: Record<string, unknown>) {
-  const next = { ...getClientWhatsappSettings(clientId), ...coerceSettings(input) };
-  saveSettings("client", clientId, Boolean(next.active), next);
+export async function updateClientWhatsappSettings(clientId: number, input: Record<string, unknown>) {
+  const next = { ...(await getClientWhatsappSettings(clientId)), ...coerceSettings(input) };
+  await saveSettings("client", clientId, Boolean(next.active), next);
   return next;
 }
 
 export async function testConnection() {
-  const settings = getGlobalWhatsappSettings();
+  const settings = await getGlobalWhatsappSettings();
   assertConfigured(settings);
   const response = await fetch(buildUrl(settings, settings.evolution_connection_endpoint_path), {
     headers: evolutionHeaders(settings)
@@ -87,13 +87,13 @@ export function sendCampaignCompletedAsync(campaignId: number) {
 }
 
 export async function sendCampaignCompleted(campaignId: number, force = false) {
-  const global = getGlobalWhatsappSettings();
+  const global = await getGlobalWhatsappSettings();
   if (force ? global.whatsapp_delivery_enabled !== true : !enabled(global, "notify_on_campaign_completed")) return null;
-  if (!force && hasDuplicate({ campaignId, type: "campaign_completed" })) return null;
+  if (!force && await hasDuplicate({ campaignId, type: "campaign_completed" })) return null;
 
-  const campaign = getCampaignForNotification(campaignId);
+  const campaign = await getCampaignForNotification(campaignId);
   if (!campaign) throw new Error("Campanha nao encontrada.");
-  const clientSettings = campaign.client_id ? getClientWhatsappSettings(Number(campaign.client_id)) : clientDefaults;
+  const clientSettings = campaign.client_id ? await getClientWhatsappSettings(Number(campaign.client_id)) : clientDefaults;
   if (!force && (clientSettings.active === false || clientSettings.receive_generated_campaigns === false)) return null;
 
   const recipient = recipientForClient(clientSettings, global);
@@ -139,10 +139,10 @@ export function sendCampaignFailedAsync(campaignId: number, error: unknown) {
 }
 
 export async function sendCampaignFailed(campaignId: number, error: unknown) {
-  const global = getGlobalWhatsappSettings();
+  const global = await getGlobalWhatsappSettings();
   if (!enabled(global, "notify_on_campaign_failed")) return null;
-  if (hasDuplicate({ campaignId, type: "campaign_failed" })) return null;
-  const campaign = getCampaignForNotification(campaignId);
+  if (await hasDuplicate({ campaignId, type: "campaign_failed" })) return null;
+  const campaign = await getCampaignForNotification(campaignId);
   const recipient = global.default_notification_phone;
   if (!recipient) return null;
   return sendViaEvolution({
@@ -166,18 +166,17 @@ export function sendQueueFailedAsync(queueId: number, error: unknown) {
 }
 
 export async function sendQueueFailed(queueId: number, error: unknown) {
-  const global = getGlobalWhatsappSettings();
+  const global = await getGlobalWhatsappSettings();
   if (!enabled(global, "notify_on_queue_failed")) return null;
-  if (hasDuplicate({ queueId, type: "queue_failed" })) return null;
-  const row = db
-    .prepare(
-      `SELECT q.*, c.name client_name, p.name plan_name
+  if (await hasDuplicate({ queueId, type: "queue_failed" })) return null;
+  const row = await get<Record<string, unknown>>(
+    `SELECT q.*, c.name client_name, p.name plan_name
        FROM campaign_generation_queue q
        LEFT JOIN clients c ON c.id = q.client_id
        LEFT JOIN campaign_plans p ON p.id = q.campaign_plan_id
-       WHERE q.id = ?`
-    )
-    .get(queueId) as Record<string, unknown> | undefined;
+       WHERE q.id = ?`,
+    [queueId]
+  );
   const recipient = global.default_notification_phone;
   if (!recipient) return null;
   return sendViaEvolution({
@@ -202,19 +201,18 @@ export function sendAgentErrorAsync(agentExecutionLogId: number) {
 }
 
 export async function sendAgentError(agentExecutionLogId: number) {
-  const global = getGlobalWhatsappSettings();
+  const global = await getGlobalWhatsappSettings();
   if (!enabled(global, "notify_on_agent_error")) return null;
-  const row = db
-    .prepare(
-      `SELECT l.*, a.key agent_key, c.name client_name
+  const row = await get<Record<string, unknown>>(
+    `SELECT l.*, a.key agent_key, c.name client_name
        FROM agent_execution_logs l
        LEFT JOIN agents a ON a.id = l.agent_id
        LEFT JOIN clients c ON c.id = l.client_id
-       WHERE l.id = ?`
-    )
-    .get(agentExecutionLogId) as Record<string, unknown> | undefined;
+       WHERE l.id = ?`,
+    [agentExecutionLogId]
+  );
   if (!row) throw new Error("Log de agente nao encontrado.");
-  if (hasDuplicate({ campaignId: Number(row.campaign_id) || null, type: "agent_error", queueId: agentExecutionLogId })) return null;
+  if (await hasDuplicate({ campaignId: Number(row.campaign_id) || null, type: "agent_error", queueId: agentExecutionLogId })) return null;
   const recipient = global.default_notification_phone;
   if (!recipient) return null;
   return sendViaEvolution({
@@ -235,17 +233,15 @@ export async function sendAgentError(agentExecutionLogId: number) {
 }
 
 export async function sendDailySummary() {
-  const global = getGlobalWhatsappSettings();
+  const global = await getGlobalWhatsappSettings();
   if (!enabled(global, "notify_on_daily_summary") || !global.default_notification_phone) return null;
-  const summary = db
-    .prepare(
-      `SELECT COUNT(*) campaigns,
+  const summary = await get<Record<string, unknown>>(
+    `SELECT COUNT(*) campaigns,
               SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) completed,
               SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) failed
        FROM campaign_generation_queue
-       WHERE date(created_at) = date('now')`
-    )
-    .get() as Record<string, unknown>;
+       WHERE created_at::date = CURRENT_DATE`
+  ) ?? {};
   return sendViaEvolution({
     type: "daily_summary",
     recipient: global.default_notification_phone,
@@ -254,7 +250,7 @@ export async function sendDailySummary() {
 }
 
 export async function sendManualTest(message?: string, to?: string) {
-  const global = getGlobalWhatsappSettings();
+  const global = await getGlobalWhatsappSettings();
   const recipient = to || global.default_notification_phone;
   if (!recipient) throw new Error("Configure um numero padrao para teste.");
   return sendViaEvolution({
@@ -265,10 +261,10 @@ export async function sendManualTest(message?: string, to?: string) {
 }
 
 async function sendViaEvolution(input: SendOptions) {
-  const settings = getGlobalWhatsappSettings();
+  const settings = await getGlobalWhatsappSettings();
   if (!settings.whatsapp_delivery_enabled && input.type !== "manual_test") return null;
   assertConfigured(settings);
-  const logId = createNotificationLog(input);
+  const logId = await createNotificationLog(input);
   try {
     const isMedia = Boolean(input.mediaUrl);
     const response = await fetch(buildUrl(settings, isMedia ? settings.evolution_image_endpoint_path : settings.evolution_text_endpoint_path), {
@@ -281,18 +277,19 @@ async function sendViaEvolution(input: SendOptions) {
     });
     const providerResponse = await readProviderResponse(response);
     if (!response.ok) throw new Error(providerErrorMessage(response.status, providerResponse));
-    updateNotificationLog(logId, "sent", providerResponse, null);
+    await updateNotificationLog(logId, "sent", providerResponse, null);
     return { id: logId, status: "sent", providerResponse };
   } catch (error) {
-    updateNotificationLog(logId, "failed", null, errorMessage(error));
+    await updateNotificationLog(logId, "failed", null, errorMessage(error));
     return { id: logId, status: "failed", error: errorMessage(error) };
   }
 }
 
-function getSettings(scopeType: "global" | "client", scopeId: number | null) {
-  const row = db
-    .prepare("SELECT settings_json FROM notification_settings WHERE scope_type = ? AND COALESCE(scope_id, 0) = COALESCE(?, 0) AND channel = 'whatsapp'")
-    .get(scopeType, scopeId) as { settings_json: string } | undefined;
+async function getSettings(scopeType: "global" | "client", scopeId: number | null) {
+  const row = await get<{ settings_json: string }>(
+    "SELECT settings_json FROM notification_settings WHERE scope_type = ? AND COALESCE(scope_id, 0) = COALESCE(?, 0) AND channel = 'whatsapp'",
+    [scopeType, scopeId]
+  );
   if (!row) return {};
   try {
     return JSON.parse(row.settings_json) as Record<string, unknown>;
@@ -301,24 +298,21 @@ function getSettings(scopeType: "global" | "client", scopeId: number | null) {
   }
 }
 
-function saveSettings(scopeType: "global" | "client", scopeId: number | null, enabled: boolean, settings: Record<string, unknown>) {
-  const existing = db
-    .prepare("SELECT id FROM notification_settings WHERE scope_type = ? AND COALESCE(scope_id, 0) = COALESCE(?, 0) AND channel = 'whatsapp'")
-    .get(scopeType, scopeId) as { id: number } | undefined;
+async function saveSettings(scopeType: "global" | "client", scopeId: number | null, enabled: boolean, settings: Record<string, unknown>) {
+  const existing = await get<{ id: number }>(
+    "SELECT id FROM notification_settings WHERE scope_type = ? AND COALESCE(scope_id, 0) = COALESCE(?, 0) AND channel = 'whatsapp'",
+    [scopeType, scopeId]
+  );
   if (existing) {
-    db.prepare("UPDATE notification_settings SET enabled = ?, settings_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(
-      enabled ? 1 : 0,
-      JSON.stringify(settings),
-      existing.id
-    );
+    await run("UPDATE notification_settings SET enabled = ?, settings_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", [enabled, JSON.stringify(settings), existing.id]);
     return;
   }
-  db.prepare("INSERT INTO notification_settings (scope_type, scope_id, channel, enabled, settings_json) VALUES (?, ?, 'whatsapp', ?, ?)").run(
+  await run("INSERT INTO notification_settings (scope_type, scope_id, channel, enabled, settings_json) VALUES (?, ?, 'whatsapp', ?, ?)", [
     scopeType,
     scopeId,
-    enabled ? 1 : 0,
+    enabled,
     JSON.stringify(settings)
-  );
+  ]);
 }
 
 function coerceSettings(input: Record<string, unknown>) {
@@ -422,51 +416,47 @@ function providerErrorMessage(status: number, body: unknown) {
   return `Evolution API retornou HTTP ${status}: ${serialized.slice(0, 500)}`;
 }
 
-function createNotificationLog(input: SendOptions) {
-  const result = db
-    .prepare(
-      `INSERT INTO notification_logs (
+async function createNotificationLog(input: SendOptions) {
+  const result = await run(
+    `INSERT INTO notification_logs (
         client_id, campaign_id, campaign_plan_id, queue_id, notification_type,
         channel, recipient, message, media_url, status
       ) VALUES (?, ?, ?, ?, ?, 'whatsapp', ?, ?, ?, 'pending')`
-    )
-    .run(input.clientId ?? null, input.campaignId ?? null, input.campaignPlanId ?? null, input.queueId ?? null, input.type, input.recipient, input.message, input.mediaUrl ?? null);
+    ,
+    [input.clientId ?? null, input.campaignId ?? null, input.campaignPlanId ?? null, input.queueId ?? null, input.type, input.recipient, input.message, input.mediaUrl ?? null]
+  );
   return Number(result.lastInsertRowid);
 }
 
-function updateNotificationLog(id: number, status: "sent" | "failed", providerResponse: unknown, error: string | null) {
-  db.prepare(
+async function updateNotificationLog(id: number, status: "sent" | "failed", providerResponse: unknown, error: string | null) {
+  await run(
     `UPDATE notification_logs
      SET status = ?, provider_response_json = ?, error_message = ?, updated_at = CURRENT_TIMESTAMP
-     WHERE id = ?`
-  ).run(status, providerResponse ? JSON.stringify(providerResponse) : null, error, id);
+     WHERE id = ?`,
+    [status, providerResponse ? JSON.stringify(providerResponse) : null, error, id]
+  );
 }
 
-function hasDuplicate(input: { campaignId?: number | null; queueId?: number | null; type: NotificationType }) {
+async function hasDuplicate(input: { campaignId?: number | null; queueId?: number | null; type: NotificationType }) {
   if (input.campaignId) {
-    const row = db
-      .prepare("SELECT id FROM notification_logs WHERE campaign_id = ? AND notification_type = ? AND status IN ('pending','sent') LIMIT 1")
-      .get(input.campaignId, input.type);
+    const row = await get("SELECT id FROM notification_logs WHERE campaign_id = ? AND notification_type = ? AND status IN ('pending','sent') LIMIT 1", [input.campaignId, input.type]);
     if (row) return true;
   }
   if (input.queueId) {
-    const row = db
-      .prepare("SELECT id FROM notification_logs WHERE queue_id = ? AND notification_type = ? AND status IN ('pending','sent') LIMIT 1")
-      .get(input.queueId, input.type);
+    const row = await get("SELECT id FROM notification_logs WHERE queue_id = ? AND notification_type = ? AND status IN ('pending','sent') LIMIT 1", [input.queueId, input.type]);
     if (row) return true;
   }
   return false;
 }
 
-function getCampaignForNotification(campaignId: number) {
-  const row = db
-    .prepare(
-      `SELECT c.*, cl.name client_name
+async function getCampaignForNotification(campaignId: number) {
+  const row = await get<Record<string, unknown>>(
+    `SELECT c.*, cl.name client_name
        FROM campaigns c
        LEFT JOIN clients cl ON cl.id = c.client_id
-       WHERE c.id = ?`
-    )
-    .get(campaignId) as Record<string, unknown> | undefined;
+       WHERE c.id = ?`,
+    [campaignId]
+  );
   if (!row) return null;
   return {
     ...row,

@@ -1,4 +1,4 @@
-import { db } from "../db/connection.js";
+import { all, get, run } from "../db/connection.js";
 import type { CampaignRecord, ClientProfile, CreativeOutput, NewCampaignInput, NormalizedBriefing, StrategyOutput } from "../types.js";
 import { executeAgentByKey } from "./agentService.js";
 import { updateAiUsageCampaign } from "./aiCostService.js";
@@ -12,11 +12,11 @@ export async function createCampaign(
   referenceFilePath?: string,
   options?: { campaignPlanId?: number | null; queueId?: number | null; reprocess?: boolean }
 ) {
-  const client = getClient(input.client_id);
+  const client = await getClient(input.client_id);
   if (!client) throw new Error("Cliente nao encontrado.");
 
-  const assets = listClientAssets(input.client_id);
-  const normalized = normalizeBriefing(input, client as ClientProfile, assets);
+  const assets = await listClientAssets(input.client_id);
+  const normalized = await normalizeBriefing(input, client as ClientProfile, assets);
   const strategistRun = await executeAgentByKey<StrategyOutput>("strategist_agent", { ...normalized, arquivo_referencia_campanha: referenceFilePath ?? null }, {
     clientId: input.client_id,
     campaignPlanId: options?.campaignPlanId ?? null,
@@ -38,9 +38,8 @@ export async function createCampaign(
     operationType: options?.reprocess ? "reprocessamento" : "geracao_imagem"
   });
 
-  const result = db
-    .prepare(
-      `INSERT INTO campaigns (
+  const result = await run(
+    `INSERT INTO campaigns (
         client_id, cliente, segmento, objetivo, publico_alvo, oferta, formato, tom_marca,
         paleta_cores, referencias_visuais, restricoes, observacoes, reference_file_path,
         free_briefing, normalized_briefing_json, strategist_output_json, creative_output_json,
@@ -50,9 +49,8 @@ export async function createCampaign(
         @paleta_cores, @referencias_visuais, @restricoes, @observacoes, @reference_file_path,
         @free_briefing, @normalized_briefing_json, @strategist_output_json, @creative_output_json,
         @final_image_url, @strategist_agent_id, @creative_agent_id, @strategy_json, @creative_json, @image_path, @image_url, 'completed'
-      )`
-    )
-    .run({
+      )`,
+    {
       client_id: input.client_id,
       cliente: normalized.client_prompt_context.nome,
       segmento: normalized.client_prompt_context.segmento,
@@ -77,16 +75,15 @@ export async function createCampaign(
       creative_json: JSON.stringify(creative),
       image_path: image.imagePath,
       image_url: image.imageUrl
-    });
+    }
+  );
 
   const campaignId = Number(result.lastInsertRowid);
-  db.prepare("UPDATE agent_execution_logs SET campaign_id = ? WHERE campaign_id IS NULL AND client_id = ? AND agent_id IN (?, ?)").run(
-    campaignId,
-    input.client_id,
-    strategistRun.agent.id,
-    creativeRun.agent.id
+  await run(
+    "UPDATE agent_execution_logs SET campaign_id = ? WHERE campaign_id IS NULL AND client_id = ? AND agent_id IN (?, ?)",
+    [campaignId, input.client_id, strategistRun.agent.id, creativeRun.agent.id]
   );
-  updateAiUsageCampaign([strategistRun.ai_usage_log_id, creativeRun.ai_usage_log_id, "aiUsageLogId" in image ? image.aiUsageLogId : null], campaignId);
+  await updateAiUsageCampaign([strategistRun.ai_usage_log_id, creativeRun.ai_usage_log_id, "aiUsageLogId" in image ? image.aiUsageLogId : null], campaignId);
   sendCampaignCompletedAsync(campaignId);
 
   return getCampaign(campaignId);
@@ -132,13 +129,13 @@ function truncate(value: string, max: number) {
   return clean.length > max ? `${clean.slice(0, max - 1).trim()}...` : clean;
 }
 
-export function setCampaignCreativeStatus(campaignId: number, creativeStatus: "draft" | "waiting_review" | "approved" | "rejected") {
-  db.prepare("UPDATE campaigns SET creative_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(creativeStatus, campaignId);
+export async function setCampaignCreativeStatus(campaignId: number, creativeStatus: "draft" | "waiting_review" | "approved" | "rejected") {
+  await run("UPDATE campaigns SET creative_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", [creativeStatus, campaignId]);
   return getCampaign(campaignId);
 }
 
-export function duplicateCampaign(id: number) {
-  const campaign = getCampaign(id);
+export async function duplicateCampaign(id: number) {
+  const campaign = await getCampaign(id);
   if (!campaign) return null;
 
   const normalized = campaign.normalized_briefing as NormalizedBriefing | undefined;
@@ -157,22 +154,19 @@ export function duplicateCampaign(id: number) {
   };
 }
 
-export function listCampaigns() {
-  return db
-    .prepare(
-      `SELECT c.id, c.client_id, COALESCE(c.cliente, cl.name) AS cliente, COALESCE(c.segmento, cl.segment) AS segmento,
+export async function listCampaigns() {
+  return all(
+    `SELECT c.id, c.client_id, COALESCE(c.cliente, cl.name) AS cliente, COALESCE(c.segmento, cl.segment) AS segmento,
               c.objetivo, c.formato, COALESCE(c.final_image_url, c.image_url) AS image_url, c.status, c.created_at
        FROM campaigns c
        LEFT JOIN clients cl ON cl.id = c.client_id
        ORDER BY c.created_at DESC`
-    )
-    .all();
+  );
 }
 
-export function listCreatives() {
-  return db
-    .prepare(
-      `SELECT c.id, c.client_id, COALESCE(c.cliente, cl.name) AS cliente, c.formato,
+export async function listCreatives() {
+  const rows = await all<CampaignRecord>(
+    `SELECT c.id, c.client_id, COALESCE(c.cliente, cl.name) AS cliente, c.formato,
               COALESCE(c.creative_output_json, c.creative_json) AS creative_json,
               COALESCE(c.strategist_output_json, c.strategy_json) AS strategy_json,
               COALESCE(c.final_image_url, c.image_url) AS image_url, c.created_at
@@ -180,9 +174,8 @@ export function listCreatives() {
        LEFT JOIN clients cl ON cl.id = c.client_id
        WHERE COALESCE(c.final_image_url, c.image_url) IS NOT NULL
        ORDER BY c.created_at DESC`
-    )
-    .all()
-    .map((row) => {
+  );
+  return rows.map((row) => {
       const item = row as CampaignRecord;
       return {
         id: item.id,
@@ -197,16 +190,15 @@ export function listCreatives() {
     });
 }
 
-export function getCampaign(id: number) {
-  const campaign = db
-    .prepare(
-      `SELECT c.*, COALESCE(c.cliente, cl.name) AS cliente, COALESCE(c.segmento, cl.segment) AS segmento,
+export async function getCampaign(id: number) {
+  const campaign = await get<CampaignRecord>(
+    `SELECT c.*, COALESCE(c.cliente, cl.name) AS cliente, COALESCE(c.segmento, cl.segment) AS segmento,
               COALESCE(c.final_image_url, c.image_url) AS image_url
        FROM campaigns c
        LEFT JOIN clients cl ON cl.id = c.client_id
-       WHERE c.id = ?`
-    )
-    .get(id) as CampaignRecord | undefined;
+       WHERE c.id = ?`,
+    [id]
+  );
   if (!campaign) return null;
 
   const strategyJson = campaign.strategist_output_json || campaign.strategy_json;
@@ -220,8 +212,8 @@ export function getCampaign(id: number) {
   };
 }
 
-export function saveCampaignLearning(campaignId: number, action: string, value?: string) {
-  const campaign = getCampaign(campaignId);
+export async function saveCampaignLearning(campaignId: number, action: string, value?: string) {
+  const campaign = await getCampaign(campaignId);
   if (!campaign?.client_id) throw new Error("Campanha sem cliente vinculado.");
 
   const fieldByAction: Record<string, { field: Parameters<typeof appendClientLearning>[1]; value: string }> = {
@@ -240,7 +232,7 @@ export function saveCampaignLearning(campaignId: number, action: string, value?:
   return appendClientLearning(campaign.client_id, learning.field, learning.value);
 }
 
-export function updateCampaignStatus(campaignId: number, status: "approved" | "rejected") {
-  db.prepare("UPDATE campaigns SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(status, campaignId);
+export async function updateCampaignStatus(campaignId: number, status: "approved" | "rejected") {
+  await run("UPDATE campaigns SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", [status, campaignId]);
   return getCampaign(campaignId);
 }

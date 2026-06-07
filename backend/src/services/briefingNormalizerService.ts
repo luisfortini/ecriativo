@@ -5,9 +5,9 @@ function pick(current: string | undefined, memory: string | null | undefined, fa
   return current?.trim() || memory?.trim() || fallback;
 }
 
-export function normalizeBriefing(input: NewCampaignInput, client: ClientProfile, assets: ClientAsset[]): NormalizedBriefing {
+export async function normalizeBriefing(input: NewCampaignInput, client: ClientProfile, assets: ClientAsset[]): Promise<NormalizedBriefing> {
   const latestAnalysis = getLatestAnalysisOutput(client);
-  const clientPromptContext = buildClientPromptContext(input.client_id);
+  const clientPromptContext = await buildClientPromptContext(input.client_id);
   const approvedReferences = assets.filter((asset) => ["approved_reference", "approved_ad", "reference_image", "logo_main", "brand_material"].includes(asset.type));
   const rejectedReferences = assets.filter((asset) => ["rejected_reference", "rejected_ad"].includes(asset.type));
   const extractedPalette = assets

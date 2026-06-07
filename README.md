@@ -10,7 +10,7 @@ MVP web para gerar anúncios com IA em fluxo de dois agentes:
 
 - Frontend: React, Vite, TypeScript, TailwindCSS
 - Backend: Node.js, Express, TypeScript
-- Banco: SQLite
+- Banco: PostgreSQL 16+
 - Integração: OpenAI API
 
 ## Instalação
@@ -18,6 +18,12 @@ MVP web para gerar anúncios com IA em fluxo de dois agentes:
 ```bash
 npm install
 copy .env.example backend\.env
+```
+
+Configure `DATABASE_URL` em `backend/.env`:
+
+```bash
+DATABASE_URL=postgresql://postgres:senha@localhost:5432/criativopro
 ```
 
 Edite `backend/.env` e informe `OPENAI_API_KEY` para usar a OpenAI. Sem a chave, o sistema roda em modo local de desenvolvimento e salva campanhas com estratégia e imagem placeholder geradas localmente.
@@ -37,6 +43,45 @@ npm run dev
 npm run build
 npm start
 ```
+
+## Docker
+
+```bash
+docker compose up --build
+```
+
+- Frontend: http://localhost:5173
+- Backend: http://localhost:3333
+- PostgreSQL: localhost:5432
+
+O servico `postgres` usa imagem `postgres:16`, volume persistente e healthcheck.
+
+## Migracao de SQLite para PostgreSQL
+
+1. Configure `DATABASE_URL` apontando para o PostgreSQL.
+2. Garanta que o SQLite atual esteja em `backend/data/criativopro.sqlite` ou informe `SQLITE_DATABASE_PATH`.
+3. Execute:
+
+```bash
+npm run migrate-sqlite-to-postgres
+```
+
+Para limpar o PostgreSQL antes de importar:
+
+```bash
+RESET_POSTGRES=true npm run migrate-sqlite-to-postgres
+```
+
+O script preserva IDs, importa tabelas conhecidas e imprime um relatorio JSON com registros migrados, ignorados e erros por tabela.
+
+## Backup e Restore
+
+```bash
+npm run backup-db
+BACKUP_FILE=backups/postgres-YYYY.dump npm run restore-db
+```
+
+Os backups usam `pg_dump --format=custom --compress=9` com timestamp no nome. O restore usa `pg_restore --clean --if-exists`.
 
 ## Estrutura
 
@@ -95,6 +140,7 @@ A tela `Planejador` permite criar campanhas em massa por tema, periodo, clientes
 - `OPENAI_API_KEY`: chave da OpenAI.
 - `OPENAI_TEXT_MODEL`: modelo dos agentes textuais. Default: `gpt-5.4-mini`.
 - `OPENAI_IMAGE_MODEL`: modelo de imagem. Default: `gpt-image-2`.
-- `DATABASE_PATH`: caminho do SQLite.
+- `DATABASE_URL`: conexao PostgreSQL.
+- `SQLITE_DATABASE_PATH`: caminho opcional do SQLite apenas para `npm run migrate-sqlite-to-postgres`.
 - `PUBLIC_BASE_URL`: URL pública do backend para arquivos gerados.
 - `FRONTEND_ORIGIN`: origem permitida no CORS.

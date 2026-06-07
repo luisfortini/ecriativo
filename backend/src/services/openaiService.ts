@@ -129,7 +129,7 @@ export async function generateImage(
       n: 1
     });
 
-    const aiUsageLogId = recordAiUsage({
+    const aiUsageLogId = await recordAiUsage({
       clientId: metadata?.clientId ?? null,
       campaignId: metadata?.campaignId ?? null,
       campaignPlanId: metadata?.campaignPlanId ?? null,
@@ -153,7 +153,7 @@ export async function generateImage(
 
     throw new Error("A geracao de imagem nao retornou arquivo ou URL.");
   } catch (error) {
-    recordAiUsage({
+    await recordAiUsage({
       clientId: metadata?.clientId ?? null,
       campaignId: metadata?.campaignId ?? null,
       campaignPlanId: metadata?.campaignPlanId ?? null,

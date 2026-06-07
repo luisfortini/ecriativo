@@ -11,12 +11,12 @@ import {
 } from "../services/whatsappNotificationService.js";
 import { AppError } from "../utils/errors.js";
 
-export function getWhatsappSettingsController(_req: Request, res: Response) {
-  res.json(getGlobalWhatsappSettings());
+export async function getWhatsappSettingsController(_req: Request, res: Response) {
+  res.json(await getGlobalWhatsappSettings());
 }
 
-export function updateWhatsappSettingsController(req: Request, res: Response) {
-  res.json(updateGlobalWhatsappSettings(req.body));
+export async function updateWhatsappSettingsController(req: Request, res: Response) {
+  res.json(await updateGlobalWhatsappSettings(req.body));
 }
 
 export async function testWhatsappConnectionController(_req: Request, res: Response) {
@@ -27,12 +27,12 @@ export async function sendWhatsappTestController(req: Request, res: Response) {
   res.json(await sendManualTest(req.body?.message, req.body?.to));
 }
 
-export function getClientWhatsappSettingsController(req: Request, res: Response) {
-  res.json(getClientWhatsappSettings(Number(req.params.id)));
+export async function getClientWhatsappSettingsController(req: Request, res: Response) {
+  res.json(await getClientWhatsappSettings(Number(req.params.id)));
 }
 
-export function updateClientWhatsappSettingsController(req: Request, res: Response) {
-  res.json(updateClientWhatsappSettings(Number(req.params.id), req.body));
+export async function updateClientWhatsappSettingsController(req: Request, res: Response) {
+  res.json(await updateClientWhatsappSettings(Number(req.params.id), req.body));
 }
 
 export async function sendCampaignWhatsappController(req: Request, res: Response) {

@@ -1,58 +1,55 @@
 import OpenAI from "openai";
 import type { ResponseTextConfig } from "openai/resources/responses/responses";
 import { config } from "../config.js";
-import { db } from "../db/connection.js";
+import { all, get, run } from "../db/connection.js";
 import type { AgentExecutionLog, AgentKey, AgentRecord, AgentVersionRecord } from "../types.js";
 import { recordAiUsage, type AiOperationType } from "./aiCostService.js";
 import { sendAgentErrorAsync } from "./whatsappNotificationService.js";
 
 const client = config.openaiApiKey ? new OpenAI({ apiKey: config.openaiApiKey, timeout: config.openaiTimeoutMs }) : null;
 
-type AgentPayload = Omit<AgentRecord, "id" | "created_at" | "updated_at"> & { change_notes?: string };
+type AgentPayload = Omit<AgentRecord, "id" | "created_at" | "updated_at" | "is_active"> & { is_active: boolean | number; change_notes?: string };
 
-export function listAgents() {
-  return db.prepare("SELECT * FROM agents ORDER BY execution_order ASC, name ASC").all() as AgentRecord[];
+export async function listAgents() {
+  return all<AgentRecord>("SELECT * FROM agents ORDER BY execution_order ASC, name ASC");
 }
 
-export function getAgent(id: number) {
-  const agent = db.prepare("SELECT * FROM agents WHERE id = ?").get(id) as AgentRecord | undefined;
+export async function getAgent(id: number) {
+  const agent = await get<AgentRecord>("SELECT * FROM agents WHERE id = ?", [id]);
   if (!agent) return null;
   return {
     ...agent,
-    versions: getAgentVersions(id),
-    logs: getAgentLogs(id, 25)
+    versions: await getAgentVersions(id),
+    logs: await getAgentLogs(id, 25)
   };
 }
 
-export function getActiveAgent(key: AgentKey) {
-  const agent = db.prepare("SELECT * FROM agents WHERE key = ? AND is_active = 1 ORDER BY execution_order ASC LIMIT 1").get(key) as
-    | AgentRecord
-    | undefined;
+export async function getActiveAgent(key: AgentKey) {
+  const agent = await get<AgentRecord>("SELECT * FROM agents WHERE key = ? AND is_active = TRUE ORDER BY execution_order ASC LIMIT 1", [key]);
   if (!agent) throw new Error(`Agente ativo nao encontrado: ${key}`);
   return agent;
 }
 
-export function createAgent(payload: AgentPayload) {
+export async function createAgent(payload: AgentPayload) {
   parseSchema(payload.output_schema_json);
-  const result = db
-    .prepare(
-      `INSERT INTO agents (
+  const result = await run(
+    `INSERT INTO agents (
         name, key, description, role, model, temperature, max_tokens,
         system_prompt, prompt_template, output_schema_json, is_active, execution_order
       ) VALUES (
         @name, @key, @description, @role, @model, @temperature, @max_tokens,
         @system_prompt, @prompt_template, @output_schema_json, @is_active, @execution_order
-      )`
-    )
-    .run(cleanAgent(payload));
+      )`,
+    cleanAgent(payload)
+  );
   const id = Number(result.lastInsertRowid);
-  createVersion(id, payload.change_notes || "Versao inicial");
+  await createVersion(id, payload.change_notes || "Versao inicial");
   return getAgent(id);
 }
 
-export function updateAgent(id: number, payload: AgentPayload) {
+export async function updateAgent(id: number, payload: AgentPayload) {
   parseSchema(payload.output_schema_json);
-  db.prepare(
+  await run(
     `UPDATE agents SET
       name = @name,
       key = @key,
@@ -67,14 +64,15 @@ export function updateAgent(id: number, payload: AgentPayload) {
       is_active = @is_active,
       execution_order = @execution_order,
       updated_at = CURRENT_TIMESTAMP
-    WHERE id = @id`
-  ).run({ id, ...cleanAgent(payload) });
-  createVersion(id, payload.change_notes || "Alteracao salva pela Central de Agentes");
+    WHERE id = @id`,
+    { id, ...cleanAgent(payload) }
+  );
+  await createVersion(id, payload.change_notes || "Alteracao salva pela Central de Agentes");
   return getAgent(id);
 }
 
-export function duplicateAgent(id: number) {
-  const agent = db.prepare("SELECT * FROM agents WHERE id = ?").get(id) as AgentRecord | undefined;
+export async function duplicateAgent(id: number) {
+  const agent = await get<AgentRecord>("SELECT * FROM agents WHERE id = ?", [id]);
   if (!agent) throw new Error("Agente nao encontrado.");
   return createAgent({
     ...agent,
@@ -86,11 +84,9 @@ export function duplicateAgent(id: number) {
   });
 }
 
-export function restoreAgentVersion(agentId: number, versionId: number) {
-  const version = db.prepare("SELECT * FROM agent_versions WHERE id = ? AND agent_id = ?").get(versionId, agentId) as
-    | AgentVersionRecord
-    | undefined;
-  const agent = db.prepare("SELECT * FROM agents WHERE id = ?").get(agentId) as AgentRecord | undefined;
+export async function restoreAgentVersion(agentId: number, versionId: number) {
+  const version = await get<AgentVersionRecord>("SELECT * FROM agent_versions WHERE id = ? AND agent_id = ?", [versionId, agentId]);
+  const agent = await get<AgentRecord>("SELECT * FROM agents WHERE id = ?", [agentId]);
   if (!version || !agent) throw new Error("Versao nao encontrada.");
 
   return updateAgent(agentId, {
@@ -106,21 +102,17 @@ export function restoreAgentVersion(agentId: number, versionId: number) {
   });
 }
 
-export function getAgentVersions(agentId: number) {
-  return db.prepare("SELECT * FROM agent_versions WHERE agent_id = ? ORDER BY version_number DESC").all(agentId) as AgentVersionRecord[];
+export async function getAgentVersions(agentId: number) {
+  return all<AgentVersionRecord>("SELECT * FROM agent_versions WHERE agent_id = ? ORDER BY version_number DESC", [agentId]);
 }
 
-export function getAgentLogs(agentId: number, limit = 100) {
-  return db
-    .prepare("SELECT * FROM agent_execution_logs WHERE agent_id = ? ORDER BY created_at DESC LIMIT ?")
-    .all(agentId, limit) as AgentExecutionLog[];
+export async function getAgentLogs(agentId: number, limit = 100) {
+  return all<AgentExecutionLog>("SELECT * FROM agent_execution_logs WHERE agent_id = ? ORDER BY created_at DESC LIMIT ?", [agentId, limit]);
 }
 
-export function compareAgentVersion(agentId: number, versionId: number) {
-  const agent = db.prepare("SELECT * FROM agents WHERE id = ?").get(agentId) as AgentRecord | undefined;
-  const version = db.prepare("SELECT * FROM agent_versions WHERE id = ? AND agent_id = ?").get(versionId, agentId) as
-    | AgentVersionRecord
-    | undefined;
+export async function compareAgentVersion(agentId: number, versionId: number) {
+  const agent = await get<AgentRecord>("SELECT * FROM agents WHERE id = ?", [agentId]);
+  const version = await get<AgentVersionRecord>("SELECT * FROM agent_versions WHERE id = ? AND agent_id = ?", [versionId, agentId]);
   if (!agent || !version) throw new Error("Versao nao encontrada.");
 
   return {
@@ -137,7 +129,7 @@ export async function executeAgentByKey<T>(
   context: unknown,
   options?: { campaignId?: number | null; clientId?: number | null; campaignPlanId?: number | null; queueId?: number | null; operationType?: AiOperationType }
 ) {
-  return executeAgent<T>(getActiveAgent(key), context, options);
+  return executeAgent<T>(await getActiveAgent(key), context, options);
 }
 
 export async function executeAgent<T>(
@@ -185,7 +177,7 @@ export async function executeAgent<T>(
     errorMessage = error instanceof Error ? error.message : "Erro ao executar agente.";
     throw error;
   } finally {
-    const saved = saveExecutionLog({
+    const saved = await saveExecutionLog({
       agentId: agent.id,
       agentKey: agent.key,
       model: agent.model,
@@ -220,7 +212,7 @@ export async function executeAgent<T>(
 }
 
 export async function testAgent(agentId: number, context: unknown, clientId?: number | null) {
-  const agent = db.prepare("SELECT * FROM agents WHERE id = ?").get(agentId) as AgentRecord | undefined;
+  const agent = await get<AgentRecord>("SELECT * FROM agents WHERE id = ?", [agentId]);
   if (!agent) throw new Error("Agente nao encontrado.");
   try {
     return await executeAgent(agent, context, { clientId: clientId ?? null });
@@ -235,31 +227,33 @@ export async function testAgent(agentId: number, context: unknown, clientId?: nu
   }
 }
 
-function createVersion(agentId: number, changeNotes: string) {
-  const agent = db.prepare("SELECT * FROM agents WHERE id = ?").get(agentId) as AgentRecord;
-  const current = db.prepare("SELECT COALESCE(MAX(version_number), 0) + 1 AS next FROM agent_versions WHERE agent_id = ?").get(agentId) as {
+async function createVersion(agentId: number, changeNotes: string) {
+  const agent = await get<AgentRecord>("SELECT * FROM agents WHERE id = ?", [agentId]);
+  if (!agent) throw new Error("Agente nao encontrado.");
+  const current = await get<{ next: number }>("SELECT COALESCE(MAX(version_number), 0) + 1 AS next FROM agent_versions WHERE agent_id = ?", [agentId]) as {
     next: number;
   };
-  db.prepare(
+  await run(
     `INSERT INTO agent_versions (
       agent_id, version_number, name, system_prompt, prompt_template, output_schema_json,
       model, temperature, max_tokens, change_notes
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    agentId,
-    current.next,
-    agent.name,
-    agent.system_prompt,
-    agent.prompt_template,
-    agent.output_schema_json,
-    agent.model,
-    agent.temperature,
-    agent.max_tokens,
-    changeNotes
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      agentId,
+      current.next,
+      agent.name,
+      agent.system_prompt,
+      agent.prompt_template,
+      agent.output_schema_json,
+      agent.model,
+      agent.temperature,
+      agent.max_tokens,
+      changeNotes
+    ]
   );
 }
 
-function saveExecutionLog(input: {
+async function saveExecutionLog(input: {
   agentId: number;
   agentKey: string;
   model: string;
@@ -280,32 +274,33 @@ function saveExecutionLog(input: {
 }) {
   const totalTokens = (input.tokensInput ?? 0) + (input.tokensOutput ?? 0);
   const contextWarning = input.tokensInput && input.tokensInput > 10000 ? "contexto excessivo" : null;
-  const result = db.prepare(
+  const result = await run(
     `INSERT INTO agent_execution_logs (
       agent_id, campaign_id, client_id, input_json, output_raw, output_parsed_json,
       status, error_message, tokens_input, tokens_output, total_tokens, context_chars, tamanho_contexto_caracteres,
       agent_key, context_warning, latency_ms
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    input.agentId,
-    input.campaignId,
-    input.clientId,
-    input.inputJson,
-    input.outputRaw,
-    input.outputParsedJson,
-    input.status,
-    input.errorMessage,
-    input.tokensInput,
-    input.tokensOutput,
-    totalTokens || null,
-    input.contextChars,
-    input.contextChars,
-    db.prepare("SELECT key FROM agents WHERE id = ?").pluck().get(input.agentId) ?? null,
-    contextWarning,
-    input.latencyMs
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      input.agentId,
+      input.campaignId,
+      input.clientId,
+      input.inputJson,
+      input.outputRaw,
+      input.outputParsedJson,
+      input.status,
+      input.errorMessage,
+      input.tokensInput,
+      input.tokensOutput,
+      totalTokens || null,
+      input.contextChars,
+      input.contextChars,
+      input.agentKey,
+      contextWarning,
+      input.latencyMs
+    ]
   );
   const executionLogId = Number(result.lastInsertRowid);
-    const aiUsageLogId = recordAiUsage({
+  const aiUsageLogId = await recordAiUsage({
     clientId: input.clientId,
     campaignId: input.campaignId,
     campaignPlanId: input.campaignPlanId,
@@ -561,7 +556,7 @@ function cleanAgent(payload: AgentPayload) {
     system_prompt: payload.system_prompt,
     prompt_template: payload.prompt_template,
     output_schema_json: payload.output_schema_json,
-    is_active: payload.is_active ? 1 : 0,
+    is_active: Boolean(payload.is_active),
     execution_order: payload.execution_order ?? 1
   };
 }

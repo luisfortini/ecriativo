@@ -58,34 +58,34 @@ const applyAnalysisSchema = z.object({
   fields: z.array(z.string()).min(1)
 });
 
-export function listClientsController(_req: Request, res: Response) {
-  res.json(listClients());
+export async function listClientsController(_req: Request, res: Response) {
+  res.json(await listClients());
 }
 
-export function getClientController(req: Request, res: Response) {
-  const client = getClient(Number(req.params.id));
+export async function getClientController(req: Request, res: Response) {
+  const client = await getClient(Number(req.params.id));
   if (!client) throw new AppError("Cliente nao encontrado.", 404);
   res.json(client);
 }
 
-export function createClientController(req: Request, res: Response) {
+export async function createClientController(req: Request, res: Response) {
   const parsed = clientSchema.safeParse(req.body);
   if (!parsed.success) throw new AppError(parsed.error.errors[0]?.message ?? "Revise o perfil do cliente.", 422);
-  res.status(201).json(createClient(parsed.data));
+  res.status(201).json(await createClient(parsed.data));
 }
 
-export function updateClientController(req: Request, res: Response) {
+export async function updateClientController(req: Request, res: Response) {
   const parsed = clientSchema.safeParse(req.body);
   if (!parsed.success) throw new AppError(parsed.error.errors[0]?.message ?? "Revise o perfil do cliente.", 422);
-  res.json(updateClient(Number(req.params.id), parsed.data));
+  res.json(await updateClient(Number(req.params.id), parsed.data));
 }
 
-export function addClientAssetController(req: Request, res: Response) {
+export async function addClientAssetController(req: Request, res: Response) {
   const parsed = assetSchema.safeParse(req.body);
   if (!parsed.success) throw new AppError("Informe o tipo do arquivo.", 422);
   if (!req.file) throw new AppError("Envie um arquivo.", 422);
   res.status(201).json(
-    addClientAsset(Number(req.params.id), parsed.data.type as ClientAssetType, req.file.path, parsed.data.description, {
+    await addClientAsset(Number(req.params.id), parsed.data.type as ClientAssetType, req.file.path, parsed.data.description, {
       user_feedback: parsed.data.user_feedback
     })
   );
@@ -97,14 +97,14 @@ export async function analyzeClientBrandController(req: Request, res: Response) 
   res.json(await analyzeClientBrand(Number(req.params.id), parsed.data));
 }
 
-export function listClientBrandAnalysesController(req: Request, res: Response) {
-  res.json(getClientBrandAnalyses(Number(req.params.id)));
+export async function listClientBrandAnalysesController(req: Request, res: Response) {
+  res.json(await getClientBrandAnalyses(Number(req.params.id)));
 }
 
-export function applyBrandAnalysisController(req: Request, res: Response) {
+export async function applyBrandAnalysisController(req: Request, res: Response) {
   const parsed = applyAnalysisSchema.safeParse(req.body);
   if (!parsed.success) throw new AppError("Selecione pelo menos uma sugestao para aplicar.", 422);
-  res.json(applyBrandAnalysis(Number(req.params.id), Number(req.params.analysisId), parsed.data));
+  res.json(await applyBrandAnalysis(Number(req.params.id), Number(req.params.analysisId), parsed.data));
 }
 
 export async function reanalyzeClientMaterialsController(req: Request, res: Response) {

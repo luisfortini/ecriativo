@@ -4,7 +4,7 @@ dotenv.config();
 
 export const config = {
   port: Number(process.env.PORT ?? 3333),
-  databasePath: process.env.DATABASE_PATH ?? "./data/e-criativo.sqlite",
+  databaseUrl: process.env.DATABASE_URL ?? "postgresql://postgres:senha@localhost:5432/criativopro",
   publicBaseUrl: process.env.PUBLIC_BASE_URL ?? "http://localhost:3333",
   frontendOrigin: process.env.FRONTEND_ORIGIN ?? "http://localhost:5173",
   openaiApiKey: process.env.OPENAI_API_KEY,
