@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 import type { ResponseTextConfig } from "openai/resources/responses/responses";
 import { config } from "../config.js";
-import { all, get, run } from "../db/connection.js";
+import { all, get, run, toPostgresBoolean } from "../db/connection.js";
 import type { AgentExecutionLog, AgentKey, AgentRecord, AgentVersionRecord } from "../types.js";
 import { recordAiUsage, type AiOperationType } from "./aiCostService.js";
 import { sendAgentErrorAsync } from "./whatsappNotificationService.js";
@@ -78,7 +78,7 @@ export async function duplicateAgent(id: number) {
     ...agent,
     key: `${agent.key}_copy_${Date.now()}`,
     name: `${agent.name} (copia)`,
-    is_active: 0,
+    is_active: false,
     execution_order: agent.execution_order + 10,
     change_notes: `Duplicado de ${agent.name}`
   });
@@ -556,7 +556,7 @@ function cleanAgent(payload: AgentPayload) {
     system_prompt: payload.system_prompt,
     prompt_template: payload.prompt_template,
     output_schema_json: payload.output_schema_json,
-    is_active: Boolean(payload.is_active),
+    is_active: toPostgresBoolean(payload.is_active),
     execution_order: payload.execution_order ?? 1
   };
 }

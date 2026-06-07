@@ -29,7 +29,7 @@ const emptyAgent = {
   system_prompt: "",
   prompt_template: "{{context_json}}",
   output_schema_json: '{\n  "type": "object",\n  "required": [],\n  "properties": {}\n}',
-  is_active: 1,
+  is_active: true,
   execution_order: 1,
   change_notes: ""
 };
@@ -267,7 +267,7 @@ function Settings({ form, setForm }: { form: typeof emptyAgent; setForm: React.D
         <textarea className="field min-h-20" value={form.role} onChange={(event) => setForm((current) => ({ ...current, role: event.target.value }))} />
       </div>
       <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-        <input checked={Boolean(form.is_active)} type="checkbox" onChange={(event) => setForm((current) => ({ ...current, is_active: event.target.checked ? 1 : 0 }))} />
+        <input checked={Boolean(form.is_active)} type="checkbox" onChange={(event) => setForm((current) => ({ ...current, is_active: event.target.checked }))} />
         Ativo
       </label>
       <div>

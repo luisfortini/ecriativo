@@ -459,7 +459,7 @@ async function seedAiModelPrices() {
     await run(
       `INSERT INTO ai_model_prices (
         model, input_price_per_1m_tokens, output_price_per_1m_tokens, image_price, currency, active
-      ) VALUES (?, 0, 0, 0, ?, 1)
+      ) VALUES (?, 0, 0, 0, ?, TRUE)
       ON CONFLICT(model) DO NOTHING`,
       [model, process.env.AI_DEFAULT_CURRENCY ?? "USD"]
     );
@@ -484,7 +484,7 @@ async function seedNotificationSettings() {
   };
   await run(
     `INSERT INTO notification_settings (scope_type, scope_id, channel, enabled, settings_json)
-     VALUES ('global', NULL, 'whatsapp', 1, ?)
+     VALUES ('global', NULL, 'whatsapp', TRUE, ?)
      ON CONFLICT (scope_type, channel) WHERE scope_id IS NULL DO NOTHING`,
     [JSON.stringify(defaults)]
   );

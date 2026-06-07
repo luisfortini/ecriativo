@@ -2,7 +2,7 @@ import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
 import { migrate } from "../db/migrate.js";
-import { all, pool, query, run } from "../db/connection.js";
+import { all, pool, query, run, toPostgresBoolean } from "../db/connection.js";
 
 const orderedTables = [
   "clients",
@@ -151,7 +151,7 @@ async function primaryKeyFor(table: string) {
 
 function normalizeValue(value: unknown, pgType?: string) {
   if (value === undefined) return null;
-  if (pgType === "boolean") return value === true || value === 1 || value === "1" || value === "true";
+  if (pgType === "boolean") return toPostgresBoolean(value);
   return value;
 }
 

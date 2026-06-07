@@ -1,4 +1,4 @@
-import { all as dbAll, get, run } from "../db/connection.js";
+import { all as dbAll, get, run, toPostgresBoolean } from "../db/connection.js";
 
 export type AiOperationType =
   | "normalizacao_briefing"
@@ -114,7 +114,7 @@ export async function upsertAiModelPrice(input: Record<string, unknown>) {
     output: Number(input.output_price_per_1m_tokens ?? 0),
     image: Number(input.image_price ?? 0),
     currency: String(input.currency ?? "USD").trim() || "USD",
-    active: input.active ? 1 : 0
+    active: toPostgresBoolean(input.active)
   };
   if (!payload.model) throw new Error("Informe o modelo.");
   if (id) {
@@ -123,7 +123,7 @@ export async function upsertAiModelPrice(input: Record<string, unknown>) {
        SET model = ?, input_price_per_1m_tokens = ?, output_price_per_1m_tokens = ?,
            image_price = ?, currency = ?, active = ?, updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
-      [payload.model, payload.input, payload.output, payload.image, payload.currency, Boolean(payload.active), id]
+      [payload.model, payload.input, payload.output, payload.image, payload.currency, payload.active, id]
     );
   } else {
     await run(
@@ -137,7 +137,7 @@ export async function upsertAiModelPrice(input: Record<string, unknown>) {
         currency = excluded.currency,
         active = excluded.active,
         updated_at = CURRENT_TIMESTAMP`,
-      [payload.model, payload.input, payload.output, payload.image, payload.currency, Boolean(payload.active)]
+      [payload.model, payload.input, payload.output, payload.image, payload.currency, payload.active]
     );
   }
   return listAiModelPrices();

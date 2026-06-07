@@ -219,7 +219,7 @@ export interface AgentRecord {
   system_prompt: string;
   prompt_template: string;
   output_schema_json: string;
-  is_active: number;
+  is_active: boolean;
   execution_order: number;
   created_at: string;
   updated_at: string;

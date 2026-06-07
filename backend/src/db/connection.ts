@@ -13,6 +13,10 @@ export interface RunResult {
 
 type QueryParams = unknown[] | Record<string, unknown>;
 
+export function toPostgresBoolean(value: unknown) {
+  return value === true || value === 1 || value === "1" || String(value).toLowerCase() === "true";
+}
+
 export async function query<T extends QueryResultRow = Record<string, unknown>>(sql: string, params?: QueryParams, client?: PoolClient) {
   const prepared = prepareSql(sql, params);
   const executor = client ?? pool;
