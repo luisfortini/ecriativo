@@ -15,7 +15,7 @@ import type {
   CreativeHistoryItem
 } from "../types";
 
-const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3333/api";
+export const API_URL = window.__APP_CONFIG__?.VITE_API_URL || import.meta.env.VITE_API_URL || "http://localhost:3333/api";
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, options);

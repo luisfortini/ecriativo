@@ -13,11 +13,10 @@ import {
   getCampaigns,
   getClients,
   saveAiCostSettings,
-  saveAiModelPrice
+  saveAiModelPrice,
+  API_URL
 } from "../services/api";
 import type { Agent, AiCostDashboard, AiModelPrice, CampaignPlan, CampaignSummary, ClientSummary } from "../types";
-
-const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3333/api";
 
 const operationOptions = [
   ["", "Todas"],
