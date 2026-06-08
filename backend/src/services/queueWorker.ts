@@ -3,14 +3,16 @@ import { processDueQueue } from "./campaignPlannerService.js";
 import { sendDailySummary } from "./whatsappNotificationService.js";
 
 export function startQueueWorker() {
-  cron.schedule("* * * * *", () => {
+  const queueTask = cron.schedule("* * * * *", () => {
     processDueQueue().catch((error) => {
       console.error("Erro no worker da fila de campanhas", error);
     });
   });
-  cron.schedule("0 18 * * *", () => {
+  const dailySummaryTask = cron.schedule("0 18 * * *", () => {
     sendDailySummary().catch((error) => {
       console.error("Erro ao enviar resumo diario por WhatsApp", error);
     });
   });
+
+  return [queueTask, dailySummaryTask];
 }
