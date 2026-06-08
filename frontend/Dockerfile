@@ -17,4 +17,4 @@ COPY --from=build /app/frontend/dist dist
 COPY frontend/package.json package.json
 RUN npm install --omit=dev vite@6.0.7
 EXPOSE 5173
-CMD ["npx", "vite", "preview", "--host", "0.0.0.0", "--port", "5173"]
+CMD ["sh", "-c", "npx vite preview --host 0.0.0.0 --port ${PORT:-5173}"]

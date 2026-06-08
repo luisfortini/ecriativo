@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "concurrently -n backend,frontend -c cyan,magenta \"npm run dev --workspace backend\" \"npm run dev --workspace frontend\"",
     "build": "npm run build --workspace backend && npm run build --workspace frontend",
+    "build:frontend": "npm run build --workspace frontend",
+    "start:frontend": "npm run start --workspace frontend",
     "start": "node backend/dist/server.js",
     "typecheck": "npm run typecheck --workspace backend && npm run typecheck --workspace frontend",
     "migrate-sqlite-to-postgres": "npm run migrate-sqlite-to-postgres --workspace backend",
