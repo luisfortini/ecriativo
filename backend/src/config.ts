@@ -4,7 +4,7 @@ dotenv.config();
 dotenv.config({ path: "backend/.env", override: false });
 
 export const config = {
-  port: Number(process.env.PORT ?? 3333),
+  port: Number(process.env.PORT ?? process.env.APP_PORT ?? process.env.SERVER_PORT ?? 3333),
   databaseUrl: process.env.DATABASE_URL ?? "postgresql://postgres:senha@localhost:5432/criativopro",
   publicBaseUrl: process.env.PUBLIC_BASE_URL ?? "http://localhost:3333",
   frontendOrigin: process.env.FRONTEND_ORIGIN ?? "http://localhost:5173",
