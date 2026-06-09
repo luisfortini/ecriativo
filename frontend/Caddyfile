@@ -1,0 +1,23 @@
+{
+	auto_https off
+}
+
+:{$PORT:5173} {
+	root * {$STATIC_ROOT:dist}
+	encode zstd gzip
+
+	log {
+		output stdout
+		format console
+	}
+
+	@staticFiles path /assets/* /favicon.ico /env.js /brand/*
+	handle @staticFiles {
+		file_server
+	}
+
+	handle {
+		try_files {path} {path}/ /index.html
+		file_server
+	}
+}
