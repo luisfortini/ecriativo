@@ -10,7 +10,19 @@ import { errorHandler } from "./utils/errors.js";
 
 const app = express();
 
-app.use(cors({ origin: config.frontendOrigin }));
+const allowedOrigins = new Set(config.frontendOrigins);
+
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin) {
+      callback(null, true);
+      return;
+    }
+
+    const normalizedOrigin = origin.replace(/\/$/, "");
+    callback(null, allowedOrigins.has(normalizedOrigin));
+  }
+}));
 app.use(express.json({ limit: "2mb" }));
 app.use("/generated", express.static(path.resolve("generated")));
 app.use("/uploads", express.static(path.resolve("uploads")));
@@ -52,6 +64,7 @@ async function bootstrap() {
   const tasks = startQueueWorker();
   const server = app.listen(config.port, "0.0.0.0", () => {
     console.log(`e-Criativo API em http://0.0.0.0:${config.port}`);
+    console.log(`CORS origins: ${config.frontendOrigins.join(", ")}`);
   });
 
   const shutdown = (signal: NodeJS.Signals) => {
