@@ -3,7 +3,7 @@ NODE_ENV = "production"
 STATIC_ROOT = "dist"
 
 [phases.setup]
-nixPkgs = ["nodejs_22", "caddy"]
+nixPkgs = ["nodejs_22"]
 
 [phases.install]
 cmds = ["npm install --include=dev"]
@@ -12,4 +12,4 @@ cmds = ["npm install --include=dev"]
 cmds = ["npm run build"]
 
 [start]
-cmd = "node scripts/write-runtime-env.mjs && echo \"Static root: $(pwd)/${STATIC_ROOT:-dist}\" && echo \"dist/assets files:\" && find \"${STATIC_ROOT:-dist}/assets\" -maxdepth 1 -type f -print | sort && caddy run --config Caddyfile --adapter caddyfile"
+cmd = "node scripts/write-runtime-env.mjs && node scripts/serve-static.mjs"
