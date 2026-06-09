@@ -3,7 +3,7 @@
 }
 
 :{$PORT:5173} {
-	root * {$STATIC_ROOT:dist}
+	root * {$STATIC_ROOT:frontend/dist}
 	encode zstd gzip
 
 	log {
