@@ -1,9 +1,11 @@
 import cors from "cors";
 import express from "express";
 import path from "node:path";
-import { config } from "./config.js";
+import { config, validateAuthConfig } from "./config.js";
 import { databaseHealth, pool } from "./db/connection.js";
 import { migrate } from "./db/migrate.js";
+import { requireAuth } from "./middleware/authMiddleware.js";
+import { authRoutes } from "./routes/authRoutes.js";
 import { campaignRoutes } from "./routes/campaignRoutes.js";
 import { startQueueWorker } from "./services/queueWorker.js";
 import { errorHandler } from "./utils/errors.js";
@@ -56,10 +58,12 @@ app.get("/health/database", async (_req, res, next) => {
   }
 });
 
-app.use("/api", campaignRoutes);
+app.use("/api/auth", authRoutes);
+app.use("/api", requireAuth, campaignRoutes);
 app.use(errorHandler);
 
 async function bootstrap() {
+  validateAuthConfig();
   await migrate();
   const tasks = startQueueWorker();
   const server = app.listen(config.port, "0.0.0.0", () => {

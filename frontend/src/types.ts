@@ -175,6 +175,19 @@ export interface CampaignDetail extends CampaignSummary {
   final_image_url?: string | null;
 }
 
+export interface AuthUser {
+  id: number;
+  name: string;
+  email: string;
+  role: "admin" | "user";
+}
+
+export interface LoginResponse {
+  token: string;
+  expiresIn: number;
+  user: AuthUser;
+}
+
 export interface CreativeBriefArtifact {
   schemaVersion: "1.0.0" | "2.0.0";
   campaignObjective: string;

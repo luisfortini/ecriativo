@@ -5,6 +5,8 @@
 **Escopo:** arquitetura funcional de IA, contratos entre agentes, memória, persistência, pipeline e Brand Overlay
 **Público principal:** especialistas responsáveis por criar, revisar e evoluir os prompts dos agentes
 
+**Acesso:** as telas internas e todas as rotas funcionais da API exigem autenticação por e-mail e senha. A sessão utiliza JWT com expiração. Health checks, login e arquivos estáticos necessários permanecem públicos.
+
 ---
 
 ## Finalidade deste documento
@@ -76,6 +78,8 @@ No planejador, uma falha pode reenfileirar a geração completa conforme a polí
 ## 1.2 Seleção do cliente
 
 Toda nova campanha precisa estar vinculada a um cliente existente.
+
+Antes de acessar clientes ou iniciar campanhas, o usuário precisa possuir uma sessão válida. Usuários inativos e tokens inválidos ou expirados não acessam o pipeline.
 
 O cliente é a unidade de memória reutilizável. É nele que ficam:
 
@@ -1184,6 +1188,21 @@ Isso preserva:
 
 Esse snapshot não significa que todos os seus campos foram enviados a todos os agentes.
 
+## 5.9 Usuários e sessão
+
+A tabela `users` armazena:
+
+- nome;
+- e-mail normalizado;
+- hash seguro da senha;
+- papel `admin` ou `user`;
+- estado ativo;
+- datas de criação e atualização.
+
+A senha original nunca é persistida nem devolvida pela API. O login retorna um JWT com prazo de expiração. Em cada rota privada, o backend valida assinatura, emissor, audiência, algoritmo, expiração e existência de um usuário ativo.
+
+O logout atual é stateless: o frontend solicita o encerramento e remove o token local. Não existe blacklist de tokens nesta primeira versão.
+
 ---
 
 # 6. Memória do cliente
@@ -2171,7 +2190,7 @@ Não existe:
 - Brand Overlay depende de logo principal PNG transparente válida;
 - erro de overlay não impede entrega, portanto uma campanha pode concluir sem logo;
 - o banco atual pode conter assets antigos de logo que não atendem à validação nova;
-- não existe autenticação ou governança de aprovação descrita dentro da arquitetura funcional de IA.
+- não existe recuperação de senha, 2FA, login social, convite de usuários, gestão avançada de permissões ou revogação centralizada de tokens.
 
 ---
 

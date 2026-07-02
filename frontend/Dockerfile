@@ -16,6 +16,6 @@ WORKDIR /app/frontend
 COPY --from=build /app/frontend/dist dist
 COPY frontend/package.json package.json
 COPY frontend/scripts scripts
-RUN npm install --omit=dev vite@6.0.7
+RUN npm install --omit=dev vite@6.4.3
 EXPOSE 5173
 CMD ["sh", "-c", "node scripts/write-runtime-env.mjs && npx vite preview --host 0.0.0.0 --port ${PORT:-5173}"]

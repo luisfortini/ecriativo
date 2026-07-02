@@ -3,6 +3,7 @@ import {
   CreativeOutputSchema,
   ProfileDiagnosticSchema
 } from "../contracts/index.js";
+import bcrypt from "bcryptjs";
 import { all, exec, get, run } from "./connection.js";
 
 interface Migration {
@@ -551,6 +552,28 @@ const migrations: Migration[] = [
           updated_at = CURRENT_TIMESTAMP
       WHERE key = 'strategist_agent';
     `
+  },
+  {
+    id: "008_users_auth",
+    up: `
+      CREATE TABLE IF NOT EXISTS users (
+        id BIGSERIAL PRIMARY KEY,
+        name TEXT NOT NULL CHECK (length(trim(name)) >= 2),
+        email TEXT NOT NULL,
+        password_hash TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('admin', 'user')),
+        active BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_unique
+        ON users(lower(email));
+      CREATE INDEX IF NOT EXISTS idx_users_active
+        ON users(active);
+      CREATE INDEX IF NOT EXISTS idx_users_role
+        ON users(role);
+    `
   }
 ];
 
@@ -567,7 +590,33 @@ export async function migrate() {
   await seedAppSettings();
   await seedAiModelPrices();
   await seedNotificationSettings();
+  await seedInitialAdmin();
   await backfillAiUsageLogs();
+}
+
+async function seedInitialAdmin() {
+  const name = process.env.ADMIN_NAME?.trim();
+  const email = process.env.ADMIN_EMAIL?.trim().toLowerCase();
+  const password = process.env.ADMIN_PASSWORD;
+  const hasAnyAdminSetting = Boolean(name || email || password);
+
+  if (!hasAnyAdminSetting) return;
+  if (!name || !email || !password) {
+    throw new Error("ADMIN_NAME, ADMIN_EMAIL e ADMIN_PASSWORD devem ser informados em conjunto.");
+  }
+  if (name.length < 2) throw new Error("ADMIN_NAME deve ter pelo menos 2 caracteres.");
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("ADMIN_EMAIL invalido.");
+  if (password.length < 12) throw new Error("ADMIN_PASSWORD deve ter pelo menos 12 caracteres.");
+
+  const existing = await get<{ id: number }>("SELECT id FROM users WHERE lower(email) = lower(?)", [email]);
+  if (existing) return;
+
+  const passwordHash = await bcrypt.hash(password, 12);
+  await run(
+    `INSERT INTO users (name, email, password_hash, role, active)
+     VALUES (?, ?, ?, 'admin', TRUE)`,
+    [name, email, passwordHash]
+  );
 }
 
 async function seedAppSettings() {

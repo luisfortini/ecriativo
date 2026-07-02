@@ -26,5 +26,16 @@ export const config = {
   openaiApiKey: process.env.OPENAI_API_KEY,
   textModel: process.env.OPENAI_TEXT_MODEL ?? "gpt-5.4-mini",
   imageModel: process.env.OPENAI_IMAGE_MODEL ?? "gpt-image-2",
-  openaiTimeoutMs: Number(process.env.OPENAI_TIMEOUT_MS ?? 120000)
+  openaiTimeoutMs: Number(process.env.OPENAI_TIMEOUT_MS ?? 120000),
+  jwtSecret: process.env.JWT_SECRET?.trim() ?? "",
+  jwtExpiresInSeconds: Number(process.env.JWT_EXPIRES_IN_SECONDS ?? 28800)
 };
+
+export function validateAuthConfig() {
+  if (config.jwtSecret.length < 32) {
+    throw new Error("JWT_SECRET deve estar configurado com pelo menos 32 caracteres.");
+  }
+  if (!Number.isInteger(config.jwtExpiresInSeconds) || config.jwtExpiresInSeconds <= 0) {
+    throw new Error("JWT_EXPIRES_IN_SECONDS deve ser um inteiro positivo.");
+  }
+}

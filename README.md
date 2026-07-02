@@ -32,6 +32,18 @@ Configure `DATABASE_URL` em `backend/.env`:
 DATABASE_URL=postgresql://postgres:senha@localhost:5432/criativopro
 ```
 
+Configure também a autenticação:
+
+```bash
+JWT_SECRET=gere-um-segredo-aleatorio-com-pelo-menos-32-caracteres
+JWT_EXPIRES_IN_SECONDS=28800
+ADMIN_NAME=Administrador
+ADMIN_EMAIL=admin@exemplo.com
+ADMIN_PASSWORD=use-uma-senha-forte-com-pelo-menos-12-caracteres
+```
+
+O administrador inicial é criado apenas quando as três variáveis `ADMIN_*` estão preenchidas. Se o e-mail já existir, o seed não cria outro usuário nem altera sua senha.
+
 Edite `backend/.env` e informe `OPENAI_API_KEY` para usar a OpenAI. Sem a chave, o sistema roda em modo local de desenvolvimento e salva campanhas com estratégia e imagem placeholder geradas localmente.
 
 ## Desenvolvimento
