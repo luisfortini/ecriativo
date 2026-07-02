@@ -19,6 +19,8 @@ Consulte a [Arquitetura Funcional de IA](docs/arquitetura-funcional-ia.md) para 
 
 ## Instalação
 
+Requer Node.js 22.x. O Brand Overlay utiliza `sharp@0.35`, que não é compatível com Node.js 18.
+
 ```bash
 npm install
 copy .env.example backend\.env
