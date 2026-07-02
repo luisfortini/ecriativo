@@ -426,6 +426,7 @@ function BrandAnalysisTab(props: {
   onUpload: (event: FormEvent) => void;
 }) {
   const latest = props.analysisResult?.comparison ?? buildComparisonFromLatest(props.client);
+  const activeDiagnostic = props.client.profile_diagnostics?.find((item) => item.status === "active");
 
   return (
     <div className="grid gap-6 xl:grid-cols-[1fr_380px]">
@@ -497,6 +498,20 @@ function BrandAnalysisTab(props: {
       </section>
 
       <aside className="space-y-4">
+        <div className="panel p-5">
+          <h2 className="mb-3 font-bold text-ink">Diagnostico oficial</h2>
+          {activeDiagnostic ? (
+            <div className="space-y-2 text-sm text-slate-700">
+              <p><strong>Versao:</strong> {activeDiagnostic.version} · schema {activeDiagnostic.schema_version}</p>
+              <p><strong>Confianca:</strong> {Math.round(activeDiagnostic.payload.confidenceScore * 100)}%</p>
+              <p><strong>Posicionamento:</strong> {activeDiagnostic.payload.positioning}</p>
+              <p className="text-xs text-slate-500">Este diagnostico sera reutilizado pelos pipelines enquanto permanecer ativo.</p>
+            </div>
+          ) : (
+            <p className="text-sm text-slate-500">Nenhum ProfileDiagnostic ativo. Uma nova analise criara a versao inicial.</p>
+          )}
+        </div>
+
         <form className="panel p-5" onSubmit={props.onUpload}>
           <h2 className="mb-4 font-bold text-ink">Analisar por referencias enviadas</h2>
           <label className="label">Classificacao</label>
@@ -518,8 +533,16 @@ function BrandAnalysisTab(props: {
           <label className="flex cursor-pointer flex-col items-center gap-2 rounded-md border border-dashed border-slate-300 bg-slate-50 p-5 text-sm text-slate-600">
             <ImageUp size={22} className="text-brand" />
             {props.assetFile ? props.assetFile.name : "Enviar print, logo, banner, post, story ou campanha"}
-            <input className="sr-only" type="file" accept="image/*,.pdf" onChange={(event) => props.setAssetFile(event.target.files?.[0] ?? null)} />
+            <input
+              className="sr-only"
+              type="file"
+              accept={props.assetType === "logo_main" ? "image/png" : "image/*,.pdf"}
+              onChange={(event) => props.setAssetFile(event.target.files?.[0] ?? null)}
+            />
           </label>
+          {props.assetType === "logo_main" && (
+            <p className="mt-2 text-xs text-slate-500">Envie um PNG com fundo transparente. A nova logo substituirá a logo principal atual.</p>
+          )}
           <button className="mt-3 w-full rounded-md bg-brand px-4 py-2 text-sm font-semibold text-white" disabled={!props.assetFile}>
             Enviar material
           </button>

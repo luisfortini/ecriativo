@@ -219,6 +219,8 @@ export interface AgentRecord {
   system_prompt: string;
   prompt_template: string;
   output_schema_json: string;
+  contract_key: string | null;
+  contract_version: string | null;
   is_active: boolean;
   execution_order: number;
   created_at: string;
@@ -258,6 +260,9 @@ export interface AgentExecutionLog {
   agent_key: string | null;
   context_warning: string | null;
   latency_ms: number | null;
+  pipeline_run_id: number | null;
+  agent_version_id: number | null;
+  step_key: string | null;
   created_at: string;
 }
 

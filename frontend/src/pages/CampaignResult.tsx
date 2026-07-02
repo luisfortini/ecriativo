@@ -5,7 +5,7 @@ import { ErrorBanner } from "../components/ErrorBanner";
 import { LoadingBlock } from "../components/LoadingBlock";
 import { PageHeader } from "../components/PageHeader";
 import { getCampaign, saveCampaignLearning, sendCampaignWhatsapp, updateCampaignStatus } from "../services/api";
-import type { CampaignDetail } from "../types";
+import type { CampaignDetail, CreativeBriefArtifact, CreativeOutputArtifact } from "../types";
 
 export function CampaignResult() {
   const { id } = useParams();
@@ -75,7 +75,13 @@ export function CampaignResult() {
   if (loading) return <LoadingBlock label="Carregando resultado..." />;
   if (error) return <ErrorBanner message={error} />;
   if (!campaign) return null;
-  const adCaption = buildAdCaption(campaign);
+  const officialBrief = campaign.pipeline_run?.artifacts
+    .filter((artifact) => artifact.artifact_type === "creative_brief" && artifact.status === "completed")
+    .slice(-1)[0]?.payload as CreativeBriefArtifact | undefined;
+  const adCaption = buildAdCaption(campaign, officialBrief);
+  const officialCreativeOutput = campaign.pipeline_run?.artifacts
+    .filter((artifact) => artifact.artifact_type === "creative_output" && artifact.status === "completed")
+    .slice(-1)[0]?.payload as CreativeOutputArtifact | undefined;
 
   return (
     <>
@@ -96,6 +102,43 @@ export function CampaignResult() {
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_440px]">
         <section className="space-y-4">
+          {campaign.pipeline_run && (
+            <Block title="Pipeline">
+              <Info label="Status" value={campaign.pipeline_run.status} />
+              <Info label="Diagnostico utilizado" value={campaign.pipeline_run.profile_diagnostic_id ? `#${campaign.pipeline_run.profile_diagnostic_id}` : "Nao vinculado"} />
+              <Info
+                label="Artefatos"
+                value={campaign.pipeline_run.artifacts.map((artifact) => `${artifact.artifact_type} v${artifact.version} · schema ${artifact.schema_version}`).join("\n") || "Nenhum artefato"}
+              />
+              <Info
+                label="Eventos"
+                value={campaign.pipeline_run.events?.map((event) => `${event.event_type}: ${event.message}`).join(" | ") || "Nenhum evento tecnico"}
+              />
+            </Block>
+          )}
+
+          {officialCreativeOutput?.brandOverlay && (
+            <Block title="Brand Overlay">
+              <Info label="Logo solicitada" value={officialCreativeOutput.brandOverlay.logoRequired ? "Sim" : "Nao"} />
+              <Info label="Posicao sugerida" value={officialCreativeOutput.brandOverlay.preferredPosition} />
+              <Info label="Tamanho sugerido" value={`${officialCreativeOutput.brandOverlay.sizePercent}%`} />
+            </Block>
+          )}
+
+          {officialBrief && (
+            <Block title="Creative Brief oficial">
+              <Info label="Objetivo" value={officialBrief.campaignObjective} />
+              <Info label="Estagio do funil" value={officialBrief.funnelStage} />
+              <Info label="Beneficio central" value={officialBrief.centralBenefit} />
+              <Info label="Objecao combatida" value={officialBrief.objectionAddressed} />
+              <Info label="Subheadline" value={officialBrief.subheadline} />
+              <Info label="Tom de voz" value={officialBrief.toneOfVoice} />
+              <Info label="Instrucoes de imagem" value={officialBrief.imageInstructions} />
+              {officialBrief.adCaption && <Info label="Legenda final" value={officialBrief.adCaption} />}
+              <Info label="Instrucoes de legenda" value={officialBrief.captionInstructions} />
+            </Block>
+          )}
+
           <Block title="Estrategia">
             <Info label="Angulo" value={campaign.strategy.angulo} />
             <Info label="Publico" value={campaign.strategy.publico} />
@@ -185,8 +228,9 @@ export function CampaignResult() {
   );
 }
 
-function buildAdCaption(campaign: CampaignDetail) {
-  const text = (campaign.strategy.texto_principal || "").replace(/^\s*texto principal para an[uú]ncio:\s*/i, "");
+function buildAdCaption(campaign: CampaignDetail, officialBrief?: CreativeBriefArtifact) {
+  const text = (officialBrief?.adCaption || campaign.strategy.texto_principal || "")
+    .replace(/^\s*texto principal para an[uú]ncio:\s*/i, "");
   const sectionStart = text.search(
     /\n\s*(sugest[oõ]es? de headlines?|headlines alternativas|estrutura visual|sugest[aã]o de criativo|sugest[aã]o de v[ií]deo|dire[cç][aã]o visual|briefing criativo|prompt de imagem)\b[^:]*:/i
   );

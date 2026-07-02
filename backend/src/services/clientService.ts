@@ -1,6 +1,7 @@
+import fs from "node:fs/promises";
 import path from "node:path";
 import { config } from "../config.js";
-import { all, get, run } from "../db/connection.js";
+import { all, get, run, transaction } from "../db/connection.js";
 import type { ClientAsset, ClientAssetType, ClientBrandAnalysis, ClientProfile } from "../types.js";
 
 const clientFields = [
@@ -44,6 +45,13 @@ export async function getClient(id: number) {
     ...client,
     assets: await listClientAssets(id),
     brand_analyses: await listClientBrandAnalyses(id),
+    profile_diagnostics: await all(
+      `SELECT *
+       FROM client_profile_diagnostics
+       WHERE client_id = ?
+       ORDER BY version DESC`,
+      [id]
+    ),
     campaigns: await all(
       `SELECT id, objetivo, oferta, formato, final_image_url, image_url, status, created_at
          FROM campaigns
@@ -104,11 +112,49 @@ export async function addClientAsset(
 ) {
   const filename = path.basename(filePath);
   const fileUrl = `${config.publicBaseUrl}/uploads/${filename}`;
+  if (type === "logo_main") {
+    const saved = await transaction(async (client) => {
+      const owner = await get("SELECT id FROM clients WHERE id = ? FOR UPDATE", [clientId], client);
+      if (!owner) throw new Error("Cliente nao encontrado.");
+      const previous = await all<{ id: number; file_url: string }>(
+        "SELECT id, file_url FROM client_assets WHERE client_id = ? AND type = 'logo_main' FOR UPDATE",
+        [clientId],
+        client
+      );
+      await run("DELETE FROM client_assets WHERE client_id = ? AND type = 'logo_main'", [clientId], client);
+      const result = await run(
+        "INSERT INTO client_assets (client_id, type, file_url, description, analysis_status, user_feedback) VALUES (?, ?, ?, ?, ?, ?)",
+        [clientId, type, fileUrl, description ?? null, options?.analysis_status ?? "pending", options?.user_feedback ?? null],
+        client
+      );
+      return {
+        asset: await get("SELECT * FROM client_assets WHERE id = ?", [result.lastInsertRowid], client),
+        previous
+      };
+    });
+    await Promise.all(saved.previous.map((asset) => removeUploadedAssetFile(asset.file_url)));
+    return saved.asset;
+  }
+
   const result = await run(
     "INSERT INTO client_assets (client_id, type, file_url, description, analysis_status, user_feedback) VALUES (?, ?, ?, ?, ?, ?)",
     [clientId, type, fileUrl, description ?? null, options?.analysis_status ?? "pending", options?.user_feedback ?? null]
   );
   return get("SELECT * FROM client_assets WHERE id = ?", [result.lastInsertRowid]);
+}
+
+async function removeUploadedAssetFile(fileUrl: string) {
+  const filename = path.basename(new URL(fileUrl).pathname);
+  const decodedFilename = decodeURIComponent(filename);
+  for (const uploadsDir of [path.resolve("uploads"), path.resolve("backend", "uploads")]) {
+    const target = path.resolve(uploadsDir, decodedFilename);
+    if (path.dirname(target) !== uploadsDir) continue;
+    try {
+      await fs.unlink(target);
+    } catch {
+      // A referencia anterior ja foi substituida; arquivo ausente nao deve bloquear o cadastro.
+    }
+  }
 }
 
 export async function updateClientAssetAnalysis(

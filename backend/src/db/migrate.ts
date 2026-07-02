@@ -1,3 +1,8 @@
+import {
+  CreativeBriefSchema,
+  CreativeOutputSchema,
+  ProfileDiagnosticSchema
+} from "../contracts/index.js";
 import { all, exec, get, run } from "./connection.js";
 
 interface Migration {
@@ -5,79 +10,9 @@ interface Migration {
   up: string;
 }
 
-const strategistSchema = JSON.stringify({
-  type: "object",
-  additionalProperties: false,
-  required: ["angulo", "publico", "promessa", "headline", "texto_principal", "cta", "briefing_criativo"],
-  properties: {
-    angulo: { type: "string" },
-    publico: { type: "string" },
-    promessa: { type: "string" },
-    headline: { type: "string" },
-    texto_principal: { type: "string" },
-    cta: { type: "string" },
-    briefing_criativo: {
-      type: "object",
-      additionalProperties: false,
-      required: ["conceito", "emocao", "composicao", "paleta", "elementos_visuais", "hierarquia", "evitar"],
-      properties: {
-        conceito: { type: "string" },
-        emocao: { type: "string" },
-        composicao: { type: "string" },
-        paleta: { type: "array", items: { type: "string" } },
-        elementos_visuais: { type: "array", items: { type: "string" } },
-        hierarquia: { type: "string" },
-        evitar: { type: "array", items: { type: "string" } }
-      }
-    }
-  }
-}, null, 2);
-
-const creativeSchema = JSON.stringify({
-  type: "object",
-  additionalProperties: false,
-  required: ["prompt_imagem", "negative_prompt", "direcao_visual_resumida"],
-  properties: {
-    prompt_imagem: { type: "string" },
-    negative_prompt: { type: "string" },
-    direcao_visual_resumida: { type: "string" }
-  }
-}, null, 2);
-
-const brandAnalyzerSchema = JSON.stringify({
-  type: "object",
-  additionalProperties: false,
-  required: [
-    "brand_voice",
-    "positioning",
-    "target_audience",
-    "color_palette",
-    "visual_style",
-    "content_patterns",
-    "common_ctas",
-    "recurring_words",
-    "approved_style_suggestions",
-    "forbidden_style_suggestions",
-    "strategic_notes",
-    "confidence_score",
-    "missing_information"
-  ],
-  properties: {
-    brand_voice: { type: "string" },
-    positioning: { type: "string" },
-    target_audience: { type: "string" },
-    color_palette: { type: "array", items: { type: "string" } },
-    visual_style: { type: "string" },
-    content_patterns: { type: "array", items: { type: "string" } },
-    common_ctas: { type: "array", items: { type: "string" } },
-    recurring_words: { type: "array", items: { type: "string" } },
-    approved_style_suggestions: { type: "array", items: { type: "string" } },
-    forbidden_style_suggestions: { type: "array", items: { type: "string" } },
-    strategic_notes: { type: "string" },
-    confidence_score: { type: "number" },
-    missing_information: { type: "array", items: { type: "string" } }
-  }
-}, null, 2);
+const strategistSchema = JSON.stringify(CreativeBriefSchema, null, 2);
+const creativeSchema = JSON.stringify(CreativeOutputSchema, null, 2);
+const brandAnalyzerSchema = JSON.stringify(ProfileDiagnosticSchema, null, 2);
 
 const migrations: Migration[] = [
   {
@@ -415,6 +350,207 @@ const migrations: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_notification_logs_status ON notification_logs(status);
       CREATE INDEX IF NOT EXISTS idx_notification_logs_created_at ON notification_logs(created_at DESC);
     `
+  },
+  {
+    id: "003_versioned_pipeline_artifacts",
+    up: `
+      CREATE TABLE IF NOT EXISTS client_profile_diagnostics (
+        id BIGSERIAL PRIMARY KEY,
+        client_id BIGINT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+        version INTEGER NOT NULL CHECK (version > 0),
+        schema_version TEXT NOT NULL CHECK (length(trim(schema_version)) > 0),
+        status TEXT NOT NULL DEFAULT 'draft'
+          CHECK (status IN ('draft', 'active', 'superseded', 'failed')),
+        payload JSONB NOT NULL,
+        source_hash TEXT,
+        source_snapshot JSONB,
+        agent_id BIGINT REFERENCES agents(id) ON DELETE SET NULL,
+        agent_version_id BIGINT REFERENCES agent_versions(id) ON DELETE SET NULL,
+        execution_log_id BIGINT REFERENCES agent_execution_logs(id) ON DELETE SET NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(client_id, version)
+      );
+
+      CREATE TABLE IF NOT EXISTS campaign_pipeline_runs (
+        id BIGSERIAL PRIMARY KEY,
+        campaign_id BIGINT NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+        client_id BIGINT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+        profile_diagnostic_id BIGINT REFERENCES client_profile_diagnostics(id) ON DELETE SET NULL,
+        status TEXT NOT NULL DEFAULT 'pending'
+          CHECK (status IN ('pending', 'running', 'completed', 'failed', 'cancelled')),
+        current_step TEXT,
+        input_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+        error_message TEXT,
+        started_at TIMESTAMPTZ,
+        finished_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+
+      ALTER TABLE agent_execution_logs
+        ADD COLUMN IF NOT EXISTS pipeline_run_id BIGINT REFERENCES campaign_pipeline_runs(id) ON DELETE SET NULL,
+        ADD COLUMN IF NOT EXISTS agent_version_id BIGINT REFERENCES agent_versions(id) ON DELETE SET NULL,
+        ADD COLUMN IF NOT EXISTS step_key TEXT;
+
+      CREATE TABLE IF NOT EXISTS campaign_artifacts (
+        id BIGSERIAL PRIMARY KEY,
+        pipeline_run_id BIGINT NOT NULL REFERENCES campaign_pipeline_runs(id) ON DELETE CASCADE,
+        artifact_type TEXT NOT NULL CHECK (length(trim(artifact_type)) > 0),
+        schema_version TEXT NOT NULL CHECK (length(trim(schema_version)) > 0),
+        version INTEGER NOT NULL CHECK (version > 0),
+        status TEXT NOT NULL DEFAULT 'completed'
+          CHECK (status IN ('draft', 'completed', 'failed', 'superseded')),
+        payload JSONB NOT NULL,
+        agent_id BIGINT REFERENCES agents(id) ON DELETE SET NULL,
+        agent_version_id BIGINT REFERENCES agent_versions(id) ON DELETE SET NULL,
+        execution_log_id BIGINT REFERENCES agent_execution_logs(id) ON DELETE SET NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(pipeline_run_id, artifact_type, version)
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_client_profile_diagnostics_active
+        ON client_profile_diagnostics(client_id)
+        WHERE status = 'active';
+      CREATE INDEX IF NOT EXISTS idx_client_profile_diagnostics_client_id
+        ON client_profile_diagnostics(client_id);
+      CREATE INDEX IF NOT EXISTS idx_client_profile_diagnostics_status
+        ON client_profile_diagnostics(status);
+
+      CREATE INDEX IF NOT EXISTS idx_campaign_pipeline_runs_client_id
+        ON campaign_pipeline_runs(client_id);
+      CREATE INDEX IF NOT EXISTS idx_campaign_pipeline_runs_campaign_id
+        ON campaign_pipeline_runs(campaign_id);
+      CREATE INDEX IF NOT EXISTS idx_campaign_pipeline_runs_status
+        ON campaign_pipeline_runs(status);
+
+      CREATE INDEX IF NOT EXISTS idx_campaign_artifacts_pipeline_run_id
+        ON campaign_artifacts(pipeline_run_id);
+      CREATE INDEX IF NOT EXISTS idx_campaign_artifacts_artifact_type
+        ON campaign_artifacts(artifact_type);
+      CREATE INDEX IF NOT EXISTS idx_campaign_artifacts_status
+        ON campaign_artifacts(status);
+      CREATE INDEX IF NOT EXISTS idx_campaign_artifacts_run_type
+        ON campaign_artifacts(pipeline_run_id, artifact_type, version DESC);
+
+      CREATE INDEX IF NOT EXISTS idx_agent_logs_pipeline_run_id
+        ON agent_execution_logs(pipeline_run_id);
+    `
+  },
+  {
+    id: "004_agent_contract_bindings",
+    up: `
+      ALTER TABLE agents
+        ADD COLUMN IF NOT EXISTS contract_key TEXT,
+        ADD COLUMN IF NOT EXISTS contract_version TEXT;
+
+      UPDATE agents
+      SET contract_key = CASE key
+            WHEN 'brand_analyzer_agent' THEN 'profile_diagnostic'
+            WHEN 'strategist_agent' THEN 'creative_brief'
+            WHEN 'creative_agent' THEN 'creative_output'
+            ELSE contract_key
+          END,
+          contract_version = CASE
+            WHEN key IN ('brand_analyzer_agent', 'strategist_agent', 'creative_agent') THEN '1.0.0'
+            ELSE contract_version
+          END
+      WHERE key IN ('brand_analyzer_agent', 'strategist_agent', 'creative_agent');
+
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1
+          FROM pg_constraint
+          WHERE conname = 'agents_contract_binding_pair_check'
+        ) THEN
+          ALTER TABLE agents
+            ADD CONSTRAINT agents_contract_binding_pair_check
+            CHECK (
+              (contract_key IS NULL AND contract_version IS NULL)
+              OR
+              (length(trim(contract_key)) > 0 AND length(trim(contract_version)) > 0)
+            );
+        END IF;
+      END
+      $$;
+
+      CREATE INDEX IF NOT EXISTS idx_agents_contract_binding
+        ON agents(contract_key, contract_version)
+        WHERE contract_key IS NOT NULL;
+    `
+  },
+  {
+    id: "005_campaign_pipeline_events",
+    up: `
+      CREATE TABLE IF NOT EXISTS campaign_pipeline_events (
+        id BIGSERIAL PRIMARY KEY,
+        campaign_id BIGINT REFERENCES campaigns(id) ON DELETE CASCADE,
+        pipeline_run_id BIGINT REFERENCES campaign_pipeline_runs(id) ON DELETE CASCADE,
+        step_key TEXT,
+        event_type TEXT NOT NULL CHECK (length(trim(event_type)) > 0),
+        severity TEXT NOT NULL CHECK (severity IN ('info', 'warning', 'error')),
+        message TEXT NOT NULL,
+        metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CHECK (campaign_id IS NOT NULL OR pipeline_run_id IS NOT NULL)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_campaign_pipeline_events_campaign_id
+        ON campaign_pipeline_events(campaign_id);
+      CREATE INDEX IF NOT EXISTS idx_campaign_pipeline_events_pipeline_run_id
+        ON campaign_pipeline_events(pipeline_run_id);
+      CREATE INDEX IF NOT EXISTS idx_campaign_pipeline_events_event_type
+        ON campaign_pipeline_events(event_type);
+      CREATE INDEX IF NOT EXISTS idx_campaign_pipeline_events_severity
+        ON campaign_pipeline_events(severity);
+      CREATE INDEX IF NOT EXISTS idx_campaign_pipeline_events_created_at
+        ON campaign_pipeline_events(created_at DESC);
+    `
+  },
+  {
+    id: "006_creative_agent_brand_overlay_prompt",
+    up: `
+      WITH updated AS (
+        UPDATE agents
+        SET system_prompt = system_prompt || E'\\n\\nBrand Overlay: nunca desenhe, recrie ou incorpore a logo do cliente diretamente na imagem. Gere somente o layout sem logo. Em brandOverlay, apenas sugira se a logo original deve ser aplicada, escolha uma unica posicao permitida e indique o tamanho percentual. Considere equilibrio visual, area de respiro e legibilidade; a aplicacao sera feita posteriormente pelo backend.',
+            updated_at = CURRENT_TIMESTAMP
+        WHERE key = 'creative_agent'
+          AND POSITION('Brand Overlay:' IN system_prompt) = 0
+        RETURNING *
+      )
+      INSERT INTO agent_versions (
+        agent_id, version_number, name, system_prompt, prompt_template, output_schema_json,
+        model, temperature, max_tokens, change_notes
+      )
+      SELECT
+        u.id,
+        COALESCE((SELECT MAX(av.version_number) FROM agent_versions av WHERE av.agent_id = u.id), 0) + 1,
+        u.name,
+        u.system_prompt,
+        u.prompt_template,
+        u.output_schema_json,
+        u.model,
+        u.temperature,
+        u.max_tokens,
+        'Instrucoes de Brand Overlay adicionadas'
+      FROM updated u;
+    `
+  },
+  {
+    id: "007_creative_brief_v2_ad_caption",
+    up: `
+      UPDATE agents
+      SET contract_version = '2.0.0',
+          system_prompt = CASE
+            WHEN POSITION('Creative Brief v2:' IN system_prompt) = 0 THEN
+              system_prompt || E'\\n\\nCreative Brief v2: preencha adCaption com a legenda final completa e pronta para publicacao, no idioma adequado ao briefing. Nao escreva instrucoes, comentarios editoriais ou metalinguagem em adCaption. Mantenha captionInstructions separado, contendo apenas orientacoes editoriais reutilizaveis para futuras adaptacoes da legenda.'
+            ELSE system_prompt
+          END,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE key = 'strategist_agent';
+    `
   }
 ];
 
@@ -499,9 +635,11 @@ async function seedAgents() {
     model: process.env.OPENAI_TEXT_MODEL ?? "gpt-5.4-mini",
     temperature: 0.4,
     max_tokens: 1800,
-    system_prompt: "Voce e o Agente Estrategista do e-Criativo. Gere uma estrategia de anuncio em portugues do Brasil, especifica, acionavel e pronta para performance. Use a memoria resumida do cliente como padrao, mas priorize dados da campanha atual. Respeite restricoes, cores proibidas, politicas do segmento e CTAs preferidos. Seja objetivo: briefing_criativo deve ser estruturado, com campos curtos, sem repetir contexto. Responda somente no JSON do schema.",
+    system_prompt: "Voce e o Agente Estrategista do e-Criativo. Gere uma estrategia de anuncio especifica, acionavel e pronta para performance, usando o idioma adequado ao briefing. Use a memoria resumida do cliente como padrao, mas priorize dados da campanha atual. Respeite restricoes, cores proibidas, politicas do segmento e CTAs preferidos. Preencha adCaption com a legenda final completa e pronta para publicacao, sem instrucoes, comentarios editoriais ou metalinguagem. Mantenha captionInstructions separado, contendo apenas orientacoes editoriais reutilizaveis. Seja objetivo, use campos curtos e nao repita o contexto. Responda somente no JSON do schema.",
     prompt_template: "Contexto enxuto da campanha e memoria consolidada do cliente:\\n{{context_json}}",
     output_schema_json: strategistSchema,
+    contract_key: "creative_brief",
+    contract_version: "2.0.0",
     execution_order: 1
   });
   await createAgentIfMissing({
@@ -512,9 +650,11 @@ async function seedAgents() {
     model: process.env.OPENAI_TEXT_MODEL ?? "gpt-5.4-mini",
     temperature: 0.5,
     max_tokens: 1800,
-    system_prompt: "Voce e o Agente Criativo do e-Criativo. Transforme a estrategia objetiva em prompt de imagem publicitaria claro. Preserve identidade visual do cliente, use referencias aprovadas quando relevantes, siga estilos aprovados e evite estilos reprovados, cores proibidas, logos inventados e texto ilegivel. Seja conciso e nao repita memoria do cliente. Responda somente no JSON do schema.",
+    system_prompt: "Voce e o Agente Criativo do e-Criativo. Transforme a estrategia objetiva em prompt de imagem publicitaria claro. Preserve identidade visual do cliente, use referencias aprovadas quando relevantes, siga estilos aprovados e evite estilos reprovados, cores proibidas e texto ilegivel. Nunca desenhe, recrie ou incorpore a logo do cliente diretamente na imagem; gere somente o layout sem logo. Em brandOverlay, apenas sugira se a logo original deve ser aplicada, escolha uma unica posicao permitida e indique o tamanho percentual considerando equilibrio visual, area de respiro e legibilidade. A aplicacao da logo original sera feita posteriormente pelo backend. Seja conciso e nao repita memoria do cliente. Responda somente no JSON do schema.",
     prompt_template: "Estrategia objetiva, memoria visual resumida e restricoes atuais:\\n{{context_json}}",
     output_schema_json: creativeSchema,
+    contract_key: "creative_output",
+    contract_version: "1.0.0",
     execution_order: 2
   });
   await createAgentIfMissing({
@@ -528,8 +668,12 @@ async function seedAgents() {
     system_prompt: "Voce e o Agente Analista de Marca do e-Criativo. Analise informacoes publicas, textos, metadados e materiais enviados de uma marca. Gere sugestoes objetivas para memoria criativa, sem inventar fatos nao observados. Nunca assuma acesso a conteudo privado. Responda somente no JSON do schema.",
     prompt_template: "Contexto de analise de marca:\\n{{context_json}}",
     output_schema_json: brandAnalyzerSchema,
+    contract_key: "profile_diagnostic",
+    contract_version: "1.0.0",
     execution_order: 0
   });
+
+  await syncBuiltInAgentSchemas();
 
   await exec(`
     INSERT INTO agent_versions (
@@ -546,14 +690,58 @@ async function seedAgents() {
   `);
 }
 
+async function syncBuiltInAgentSchemas() {
+  const schemas = new Map([
+    ["strategist_agent", strategistSchema],
+    ["creative_agent", creativeSchema],
+    ["brand_analyzer_agent", brandAnalyzerSchema]
+  ]);
+
+  for (const [key, schema] of schemas) {
+    const agent = await get<Record<string, unknown>>("SELECT * FROM agents WHERE key = ?", [key]);
+    if (!agent || String(agent.output_schema_json) === schema) continue;
+
+    await run(
+      `UPDATE agents
+       SET output_schema_json = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+      [schema, agent.id]
+    );
+    const nextVersion = await get<{ next: number }>(
+      "SELECT COALESCE(MAX(version_number), 0) + 1 AS next FROM agent_versions WHERE agent_id = ?",
+      [agent.id]
+    );
+    await run(
+      `INSERT INTO agent_versions (
+        agent_id, version_number, name, system_prompt, prompt_template, output_schema_json,
+        model, temperature, max_tokens, change_notes
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        agent.id,
+        nextVersion?.next ?? 1,
+        agent.name,
+        agent.system_prompt,
+        agent.prompt_template,
+        schema,
+        agent.model,
+        agent.temperature,
+        agent.max_tokens,
+        "Schema sincronizado com contrato oficial"
+      ]
+    );
+  }
+}
+
 async function createAgentIfMissing(agent: Record<string, unknown>) {
   await run(
     `INSERT INTO agents (
       name, key, description, role, model, temperature, max_tokens,
-      system_prompt, prompt_template, output_schema_json, is_active, execution_order
+      system_prompt, prompt_template, output_schema_json, contract_key, contract_version,
+      is_active, execution_order
     ) VALUES (
       @name, @key, @description, @role, @model, @temperature, @max_tokens,
-      @system_prompt, @prompt_template, @output_schema_json, TRUE, @execution_order
+      @system_prompt, @prompt_template, @output_schema_json, @contract_key, @contract_version,
+      TRUE, @execution_order
     ) ON CONFLICT(key) DO NOTHING`,
     agent
   );

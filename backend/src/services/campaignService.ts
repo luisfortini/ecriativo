@@ -1,11 +1,29 @@
 import { all, get, run } from "../db/connection.js";
-import type { CampaignRecord, ClientProfile, CreativeOutput, NewCampaignInput, NormalizedBriefing, StrategyOutput } from "../types.js";
+import {
+  creativeBriefToLegacyStrategy,
+  creativeOutputToLegacy,
+  type CreativeBrief,
+  type CreativeOutput
+} from "../contracts/index.js";
+import type { CampaignRecord, ClientProfile, NewCampaignInput, NormalizedBriefing } from "../types.js";
 import { executeAgentByKey } from "./agentService.js";
 import { updateAiUsageCampaign } from "./aiCostService.js";
+import { analyzeClientBrand } from "./brandAnalysisService.js";
+import { applyBrandOverlay } from "./brandOverlayService.js";
+import {
+  CAMPAIGN_ARTIFACT_TYPES,
+  completeCampaignPipelineRun,
+  createCampaignPipelineRun,
+  failCampaignPipelineRun,
+  getLatestCampaignPipelineRun,
+  runCampaignPipelineStep,
+  saveCampaignArtifact
+} from "./campaignPipelineService.js";
 import { sendCampaignCompletedAsync } from "./whatsappNotificationService.js";
 import { normalizeBriefing } from "./briefingNormalizerService.js";
 import { appendClientLearning, getClient, listClientAssets } from "./clientService.js";
 import { generateImage } from "./openaiService.js";
+import { getActiveProfileDiagnostic, type ProfileDiagnosticRecord } from "./profileDiagnosticService.js";
 
 export async function createCampaign(
   input: NewCampaignInput,
@@ -17,38 +35,155 @@ export async function createCampaign(
 
   const assets = await listClientAssets(input.client_id);
   const normalized = await normalizeBriefing(input, client as ClientProfile, assets);
-  const strategistRun = await executeAgentByKey<StrategyOutput>("strategist_agent", { ...normalized, arquivo_referencia_campanha: referenceFilePath ?? null }, {
-    clientId: input.client_id,
-    campaignPlanId: options?.campaignPlanId ?? null,
-    queueId: options?.queueId ?? null,
-    operationType: options?.reprocess ? "reprocessamento" : "estrategista"
-  });
-  const strategy = strategistRun.parsed;
-  const creativeRun = await executeAgentByKey<CreativeOutput>("creative_agent", buildCreativeAgentContext(normalized, strategy), {
-    clientId: input.client_id,
-    campaignPlanId: options?.campaignPlanId ?? null,
-    queueId: options?.queueId ?? null,
-    operationType: options?.reprocess ? "reprocessamento" : "criativo"
-  });
-  const creative = creativeRun.parsed;
-  const image = await generateImage(creative.prompt_imagem, input.formato, {
-    clientId: input.client_id,
-    campaignPlanId: options?.campaignPlanId ?? null,
-    queueId: options?.queueId ?? null,
-    operationType: options?.reprocess ? "reprocessamento" : "geracao_imagem"
-  });
+  const campaignId = await createPendingCampaign(input, normalized, referenceFilePath);
+  let pipelineRunId: number | null = null;
 
+  try {
+    const profileDiagnostic = await ensureActiveProfileDiagnostic(input.client_id);
+    const pipelineRun = await createCampaignPipelineRun({
+      campaignId,
+      clientId: input.client_id,
+      profileDiagnosticId: profileDiagnostic.id,
+      inputSnapshot: normalized
+    });
+    if (!pipelineRun) throw new Error("Nao foi possivel criar a execucao do pipeline.");
+    pipelineRunId = Number(pipelineRun.id);
+
+    const strategistRun = await runCampaignPipelineStep(pipelineRunId, "creative_brief", () =>
+      executeAgentByKey<CreativeBrief>(
+        "strategist_agent",
+        buildStrategistAgentContext(normalized, profileDiagnostic, referenceFilePath),
+        {
+          campaignId,
+          clientId: input.client_id,
+          campaignPlanId: options?.campaignPlanId ?? null,
+          queueId: options?.queueId ?? null,
+          pipelineRunId,
+          stepKey: "creative_brief",
+          operationType: options?.reprocess ? "reprocessamento" : "estrategista"
+        }
+      )
+    );
+    const creativeBrief = strategistRun.parsed;
+    await saveCampaignArtifact(
+      pipelineRunId,
+      { artifactType: CAMPAIGN_ARTIFACT_TYPES.creativeBrief, payload: creativeBrief },
+      {
+        agentId: strategistRun.agent.id,
+        agentVersionId: strategistRun.agent_version_id,
+        executionLogId: strategistRun.execution_log_id
+      }
+    );
+
+    const creativeRun = await runCampaignPipelineStep(pipelineRunId, "creative_output", () =>
+      executeAgentByKey<CreativeOutput>(
+        "creative_agent",
+        buildCreativeAgentContext(profileDiagnostic, creativeBrief, normalized.format),
+        {
+          campaignId,
+          clientId: input.client_id,
+          campaignPlanId: options?.campaignPlanId ?? null,
+          queueId: options?.queueId ?? null,
+          pipelineRunId,
+          stepKey: "creative_output",
+          operationType: options?.reprocess ? "reprocessamento" : "criativo"
+        }
+      )
+    );
+    const creativeOutput = creativeRun.parsed;
+    await saveCampaignArtifact(
+      pipelineRunId,
+      { artifactType: CAMPAIGN_ARTIFACT_TYPES.creativeOutput, payload: creativeOutput },
+      {
+        agentId: creativeRun.agent.id,
+        agentVersionId: creativeRun.agent_version_id,
+        executionLogId: creativeRun.execution_log_id
+      }
+    );
+
+    const image = await runCampaignPipelineStep(pipelineRunId, "image_generation", () =>
+      generateImage(
+        `${creativeOutput.imagePrompt}\nEvitar: ${creativeOutput.negativePrompt}\nNao desenhe, recrie ou incorpore logotipos. Reserve a area sugerida para aplicacao posterior da logo original.`,
+        input.formato,
+        {
+          clientId: input.client_id,
+          campaignId,
+          campaignPlanId: options?.campaignPlanId ?? null,
+          queueId: options?.queueId ?? null,
+          operationType: options?.reprocess ? "reprocessamento" : "geracao_imagem"
+        }
+      )
+    );
+    const brandOverlay = await runCampaignPipelineStep(pipelineRunId, "brand_overlay", () =>
+      applyBrandOverlay({
+        campaignId,
+        pipelineRunId: Number(pipelineRunId),
+        clientId: input.client_id,
+        generatedImagePath: image.imagePath,
+        generatedImageUrl: image.imageUrl,
+        overlay: creativeOutput.brandOverlay
+      })
+    );
+    const strategy = creativeBriefToLegacyStrategy(creativeBrief);
+    const creative = creativeOutputToLegacy(creativeOutput);
+
+    await run(
+      `UPDATE campaigns SET
+        strategist_output_json = ?,
+        creative_output_json = ?,
+        final_image_url = ?,
+        strategist_agent_id = ?,
+        creative_agent_id = ?,
+        strategy_json = ?,
+        creative_json = ?,
+        image_path = ?,
+        image_url = ?,
+        status = 'completed',
+        error_message = NULL,
+        updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+      [
+        JSON.stringify(strategy),
+        JSON.stringify(creative),
+        brandOverlay.finalImageUrl,
+        strategistRun.agent.id,
+        creativeRun.agent.id,
+        JSON.stringify(strategy),
+        JSON.stringify(creative),
+        image.imagePath,
+        image.imageUrl,
+        campaignId
+      ]
+    );
+
+    await completeCampaignPipelineRun(pipelineRunId);
+    await updateAiUsageCampaign(
+      [strategistRun.ai_usage_log_id, creativeRun.ai_usage_log_id, "aiUsageLogId" in image ? image.aiUsageLogId : null],
+      campaignId
+    );
+    sendCampaignCompletedAsync(campaignId);
+    return getCampaign(campaignId);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Falha ao executar pipeline da campanha.";
+    await run(
+      "UPDATE campaigns SET status = 'failed', error_message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+      [message, campaignId]
+    );
+    if (pipelineRunId) await failCampaignPipelineRun(pipelineRunId, error);
+    throw error;
+  }
+}
+
+async function createPendingCampaign(input: NewCampaignInput, normalized: NormalizedBriefing, referenceFilePath?: string) {
   const result = await run(
     `INSERT INTO campaigns (
         client_id, cliente, segmento, objetivo, publico_alvo, oferta, formato, tom_marca,
         paleta_cores, referencias_visuais, restricoes, observacoes, reference_file_path,
-        free_briefing, normalized_briefing_json, strategist_output_json, creative_output_json,
-        final_image_url, strategist_agent_id, creative_agent_id, strategy_json, creative_json, image_path, image_url, status
+        free_briefing, normalized_briefing_json, status
       ) VALUES (
         @client_id, @cliente, @segmento, @objetivo, @publico_alvo, @oferta, @formato, @tom_marca,
         @paleta_cores, @referencias_visuais, @restricoes, @observacoes, @reference_file_path,
-        @free_briefing, @normalized_briefing_json, @strategist_output_json, @creative_output_json,
-        @final_image_url, @strategist_agent_id, @creative_agent_id, @strategy_json, @creative_json, @image_path, @image_url, 'completed'
+        @free_briefing, @normalized_briefing_json, 'processing'
       )`,
     {
       client_id: input.client_id,
@@ -65,68 +200,57 @@ export async function createCampaign(
       observacoes: normalized.observations,
       reference_file_path: referenceFilePath ?? null,
       free_briefing: input.free_briefing,
-      normalized_briefing_json: JSON.stringify(normalized),
-      strategist_output_json: JSON.stringify(strategy),
-      creative_output_json: JSON.stringify(creative),
-      final_image_url: image.imageUrl,
-      strategist_agent_id: strategistRun.agent.id,
-      creative_agent_id: creativeRun.agent.id,
-      strategy_json: JSON.stringify(strategy),
-      creative_json: JSON.stringify(creative),
-      image_path: image.imagePath,
-      image_url: image.imageUrl
+      normalized_briefing_json: JSON.stringify(normalized)
     }
   );
-
-  const campaignId = Number(result.lastInsertRowid);
-  await run(
-    "UPDATE agent_execution_logs SET campaign_id = ? WHERE campaign_id IS NULL AND client_id = ? AND agent_id IN (?, ?)",
-    [campaignId, input.client_id, strategistRun.agent.id, creativeRun.agent.id]
-  );
-  await updateAiUsageCampaign([strategistRun.ai_usage_log_id, creativeRun.ai_usage_log_id, "aiUsageLogId" in image ? image.aiUsageLogId : null], campaignId);
-  sendCampaignCompletedAsync(campaignId);
-
-  return getCampaign(campaignId);
+  return Number(result.lastInsertRowid);
 }
 
-function buildCreativeAgentContext(normalized: NormalizedBriefing, strategy: StrategyOutput) {
+function buildStrategistAgentContext(
+  normalized: NormalizedBriefing,
+  profileDiagnostic: ProfileDiagnosticRecord,
+  referenceFilePath?: string
+) {
   return {
-    estrategia_objetiva: limitStrategyForCreative(strategy),
-    client_prompt_context: normalized.client_prompt_context,
-    formato_desejado: normalized.format,
-    restricoes_campanha_atual: {
-      objetivo: truncate(normalized.objective, 500),
-      oferta: truncate(normalized.offer, 500),
-      publico_alvo: truncate(normalized.target_audience, 500),
-      restricoes: truncate(normalized.restrictions, 700),
-      observacoes: truncate(normalized.observations, 700),
-      cores_proibidas: truncate(normalized.forbidden_colors, 360),
-      estilos_proibidos: truncate(normalized.forbidden_styles, 700),
-      referencias_aprovadas: normalized.client_prompt_context.referencias_aprovadas_resumidas,
-      referencias_reprovadas: normalized.client_prompt_context.referencias_reprovadas_resumidas
+    profile_diagnostic: profileDiagnostic.payload,
+    campaign_briefing: {
+      freeBriefing: truncate(normalized.free_briefing, 1800),
+      objective: truncate(normalized.objective, 500),
+      offer: truncate(normalized.offer, 500),
+      format: normalized.format,
+      targetAudienceOverride: truncate(normalized.target_audience, 500),
+      restrictions: truncate(normalized.restrictions, 700),
+      observations: truncate(normalized.observations, 700),
+      approvedReferences: normalized.client_prompt_context.referencias_aprovadas_resumidas,
+      rejectedReferences: normalized.client_prompt_context.referencias_reprovadas_resumidas,
+      campaignReferenceFile: referenceFilePath ?? null
     }
   };
 }
 
-function limitStrategyForCreative(strategy: StrategyOutput) {
-  return truncateDeep(strategy, {
-    defaultString: 700,
-    briefingCriativo: 2500,
-    total: 4000
-  }) as StrategyOutput;
-}
-
-function truncateDeep(value: unknown, limits: { defaultString: number; briefingCriativo: number; total: number }, key = ""): unknown {
-  if (typeof value === "string") return truncate(value, key === "briefing_criativo" ? limits.briefingCriativo : limits.defaultString);
-  if (Array.isArray(value)) return value.slice(0, 12).map((item) => truncateDeep(item, limits));
-  if (!value || typeof value !== "object") return value;
-  const compact = Object.fromEntries(Object.entries(value).map(([itemKey, itemValue]) => [itemKey, truncateDeep(itemValue, limits, itemKey)]));
-  return compact;
+function buildCreativeAgentContext(
+  profileDiagnostic: ProfileDiagnosticRecord,
+  creativeBrief: CreativeBrief,
+  format: string
+) {
+  return {
+    profile_diagnostic: profileDiagnostic.payload,
+    creative_brief: creativeBrief,
+    output_format: format
+  };
 }
 
 function truncate(value: string, max: number) {
   const clean = String(value ?? "").replace(/\s+/g, " ").trim();
   return clean.length > max ? `${clean.slice(0, max - 1).trim()}...` : clean;
+}
+
+async function ensureActiveProfileDiagnostic(clientId: number) {
+  const existing = await getActiveProfileDiagnostic(clientId);
+  if (existing) return existing;
+  const generated = await analyzeClientBrand(clientId, { manual_notes: "Diagnostico inicial automatico para o pipeline de campanha." });
+  if (!generated.profile_diagnostic) throw new Error("Nao foi possivel gerar o diagnostico do cliente.");
+  return generated.profile_diagnostic as ProfileDiagnosticRecord;
 }
 
 export async function setCampaignCreativeStatus(campaignId: number, creativeStatus: "draft" | "waiting_review" | "approved" | "rejected") {
@@ -193,6 +317,7 @@ export async function listCreatives() {
 export async function getCampaign(id: number) {
   const campaign = await get<CampaignRecord>(
     `SELECT c.*, COALESCE(c.cliente, cl.name) AS cliente, COALESCE(c.segmento, cl.segment) AS segmento,
+              c.image_url AS generated_image_url,
               COALESCE(c.final_image_url, c.image_url) AS image_url
        FROM campaigns c
        LEFT JOIN clients cl ON cl.id = c.client_id
@@ -208,7 +333,8 @@ export async function getCampaign(id: number) {
     ...campaign,
     strategy: JSON.parse(strategyJson),
     creative: JSON.parse(creativeJson),
-    normalized_briefing: campaign.normalized_briefing_json ? JSON.parse(campaign.normalized_briefing_json) : null
+    normalized_briefing: campaign.normalized_briefing_json ? JSON.parse(campaign.normalized_briefing_json) : null,
+    pipeline_run: await getLatestCampaignPipelineRun(id)
   };
 }
 

@@ -130,7 +130,7 @@ export async function sendCampaignCompleted(campaignId: number, force = false) {
     type: "campaign_completed",
     recipient,
     message,
-    mediaUrl: campaign.image_url || campaign.final_image_url || null
+    mediaUrl: campaign.final_image_url || campaign.image_url || null
   });
 }
 
@@ -451,7 +451,17 @@ async function hasDuplicate(input: { campaignId?: number | null; queueId?: numbe
 
 async function getCampaignForNotification(campaignId: number) {
   const row = await get<Record<string, unknown>>(
-    `SELECT c.*, cl.name client_name
+    `SELECT c.*, cl.name client_name,
+            (
+              SELECT ca.payload->>'adCaption'
+              FROM campaign_pipeline_runs pr
+              JOIN campaign_artifacts ca ON ca.pipeline_run_id = pr.id
+              WHERE pr.campaign_id = c.id
+                AND ca.artifact_type = 'creative_brief'
+                AND ca.status = 'completed'
+              ORDER BY pr.created_at DESC, ca.version DESC
+              LIMIT 1
+            ) AS official_ad_caption
        FROM campaigns c
        LEFT JOIN clients cl ON cl.id = c.client_id
        WHERE c.id = ?`,
@@ -466,7 +476,12 @@ async function getCampaignForNotification(campaignId: number) {
 }
 
 function buildAdCaption(campaign: Record<string, any>) {
-  const text = String(campaign.strategy?.texto_principal || campaign.creative?.direcao_visual_resumida || "");
+  const text = String(
+    campaign.official_ad_caption
+    || campaign.strategy?.texto_principal
+    || campaign.creative?.direcao_visual_resumida
+    || ""
+  );
   return text.replace(/^\s*texto principal para an[uú]ncio:\s*/i, "").trim() || text.trim();
 }
 

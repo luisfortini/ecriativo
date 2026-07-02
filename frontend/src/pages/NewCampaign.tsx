@@ -140,6 +140,14 @@ export function NewCampaign() {
                 <Memory label="Paleta" value={memory.color_palette} />
                 <Memory label="Estilos aprovados" value={memory.approved_styles} />
                 <Memory label="Estilos proibidos" value={memory.forbidden_styles} />
+                <Memory
+                  label="Diagnostico de perfil"
+                  value={
+                    memory.profile_diagnostics?.find((item) => item.status === "active")
+                      ? `v${memory.profile_diagnostics.find((item) => item.status === "active")?.version} · contrato ${memory.profile_diagnostics.find((item) => item.status === "active")?.schema_version}`
+                      : "Sera gerado automaticamente antes do primeiro pipeline"
+                  }
+                />
                 <p className="text-xs text-slate-500">{memory.assets.length} assets disponiveis para os agentes.</p>
               </div>
             ) : (

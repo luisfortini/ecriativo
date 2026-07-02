@@ -224,7 +224,21 @@ export function AgentCenter() {
             {tab === "Configuracoes" && <Settings form={form} setForm={setForm} />}
             {tab === "Prompt do sistema" && <Editor label="system_prompt" value={form.system_prompt} onChange={(value) => setForm((current) => ({ ...current, system_prompt: value }))} />}
             {tab === "Template de entrada" && <Editor label="prompt_template" value={form.prompt_template} onChange={(value) => setForm((current) => ({ ...current, prompt_template: value }))} />}
-            {tab === "Schema de saida" && <Editor label="output_schema_json" value={form.output_schema_json} onChange={(value) => setForm((current) => ({ ...current, output_schema_json: value }))} />}
+            {tab === "Schema de saida" && (
+              <div>
+                {selected?.contract_key && (
+                  <div className="mb-4 rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                    Contrato oficial: <strong>{selected.contract_key}@{selected.contract_version}</strong>. O schema e gerado pelo registry TypeBox e nao pode ser editado aqui.
+                  </div>
+                )}
+                <Editor
+                  label="output_schema_json"
+                  value={form.output_schema_json}
+                  readOnly={Boolean(selected?.contract_key)}
+                  onChange={(value) => setForm((current) => ({ ...current, output_schema_json: value }))}
+                />
+              </div>
+            )}
             {tab === "Teste do agente" && (
               <TestPanel
                 clients={clients}
@@ -287,11 +301,16 @@ function Field({ label, type = "text", value, onChange }: { label: string; type?
   );
 }
 
-function Editor({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+function Editor({ label, value, readOnly = false, onChange }: { label: string; value: string; readOnly?: boolean; onChange: (value: string) => void }) {
   return (
     <div>
       <label className="label">{label}</label>
-      <textarea className="field min-h-[520px] font-mono text-xs leading-5" value={value} onChange={(event) => onChange(event.target.value)} />
+      <textarea
+        className="field min-h-[520px] font-mono text-xs leading-5 disabled:bg-slate-100"
+        value={value}
+        disabled={readOnly}
+        onChange={(event) => onChange(event.target.value)}
+      />
     </div>
   );
 }
@@ -401,6 +420,9 @@ function LogsPanel({ logs }: { logs: AgentExecutionLog[] }) {
             <span>contexto: {log.context_chars ?? log.tamanho_contexto_caracteres ?? "-"} chars</span>
             {log.campaign_id && <span>campanha: {log.campaign_id}</span>}
             {log.client_id && <span>cliente: {log.client_id}</span>}
+            {log.pipeline_run_id && <span>pipeline: {log.pipeline_run_id}</span>}
+            {log.step_key && <span>etapa: {log.step_key}</span>}
+            {log.agent_version_id && <span>versao do agente: {log.agent_version_id}</span>}
           </div>
           <div className="mt-3 grid gap-3 xl:grid-cols-2">
             <Result title="Input" value={log.input_json} />

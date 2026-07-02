@@ -1,9 +1,11 @@
 import type { Request, Response } from "express";
+import fs from "node:fs/promises";
 import { z } from "zod";
 import { addClientAsset, createClient, getClient, listClients, updateClient } from "../services/clientService.js";
 import { analyzeClientBrand, applyBrandAnalysis, getClientBrandAnalyses, reanalyzeClientMaterials } from "../services/brandAnalysisService.js";
 import type { ClientAssetType } from "../types.js";
 import { AppError } from "../utils/errors.js";
+import { validateMainLogoFile } from "../services/brandOverlayService.js";
 
 const clientSchema = z.object({
   name: z.string().min(2, "Informe o nome do cliente."),
@@ -84,6 +86,14 @@ export async function addClientAssetController(req: Request, res: Response) {
   const parsed = assetSchema.safeParse(req.body);
   if (!parsed.success) throw new AppError("Informe o tipo do arquivo.", 422);
   if (!req.file) throw new AppError("Envie um arquivo.", 422);
+  if (parsed.data.type === "logo_main") {
+    try {
+      await validateMainLogoFile(req.file.path);
+    } catch (error) {
+      await fs.unlink(req.file.path).catch(() => undefined);
+      throw new AppError(error instanceof Error ? error.message : "A logo principal deve ser um PNG transparente.", 422);
+    }
+  }
   res.status(201).json(
     await addClientAsset(Number(req.params.id), parsed.data.type as ClientAssetType, req.file.path, parsed.data.description, {
       user_feedback: parsed.data.user_feedback

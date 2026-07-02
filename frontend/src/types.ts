@@ -56,7 +56,36 @@ export interface ClientProfile extends ClientSummary {
   instagram_url: string | null;
   assets: ClientAsset[];
   brand_analyses: ClientBrandAnalysis[];
+  profile_diagnostics: ProfileDiagnosticRecord[];
   campaigns: CampaignSummary[];
+}
+
+export interface ProfileDiagnostic {
+  schemaVersion: "1.0.0";
+  brandVoice: string;
+  positioning: string;
+  targetAudience: string;
+  colorPalette: string[];
+  visualStyle: string;
+  contentPatterns: string[];
+  commonCtas: string[];
+  recurringWords: string[];
+  approvedStyleSuggestions: string[];
+  forbiddenStyleSuggestions: string[];
+  strategicNotes: string;
+  confidenceScore: number;
+  missingInformation: string[];
+}
+
+export interface ProfileDiagnosticRecord {
+  id: number;
+  client_id: number;
+  version: number;
+  schema_version: string;
+  status: "draft" | "active" | "superseded" | "failed";
+  payload: ProfileDiagnostic;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface ClientBrandAnalysis {
@@ -141,6 +170,90 @@ export interface CampaignDetail extends CampaignSummary {
   strategy: Strategy;
   creative: Creative;
   normalized_briefing: NormalizedBriefing | null;
+  pipeline_run: CampaignPipelineRun | null;
+  generated_image_url?: string | null;
+  final_image_url?: string | null;
+}
+
+export interface CreativeBriefArtifact {
+  schemaVersion: "1.0.0" | "2.0.0";
+  campaignObjective: string;
+  targetAudience: string;
+  funnelStage: string;
+  communicationAngle: string;
+  mainPromise: string;
+  centralBenefit: string;
+  objectionAddressed: string;
+  headline: string;
+  subheadline: string;
+  callToAction: string;
+  toneOfVoice: string;
+  allowedTriggers: string[];
+  restrictions: string[];
+  visualDirection: {
+    concept: string;
+    emotion: string;
+    composition: string;
+    colorPalette: string[];
+    visualElements: string[];
+    avoid: string[];
+  };
+  elementHierarchy: string[];
+  imageInstructions: string;
+  adCaption?: string;
+  captionInstructions: string;
+}
+
+export interface CreativeOutputArtifact {
+  schemaVersion: "1.0.0";
+  imagePrompt: string;
+  negativePrompt: string;
+  visualDirectionSummary: string;
+  brandOverlay: {
+    logoRequired: boolean;
+    preferredPosition: "top_left" | "top_right" | "bottom_left" | "bottom_right" | "bottom_center";
+    sizePercent: number;
+  };
+}
+
+export interface CampaignArtifact {
+  id: number;
+  pipeline_run_id: number;
+  artifact_type: "creative_brief" | "creative_output" | string;
+  schema_version: string;
+  version: number;
+  status: "draft" | "completed" | "failed" | "superseded";
+  payload: CreativeBriefArtifact | CreativeOutputArtifact | Record<string, unknown>;
+  agent_id: number | null;
+  agent_version_id: number | null;
+  execution_log_id: number | null;
+  created_at: string;
+}
+
+export interface CampaignPipelineRun {
+  id: number;
+  campaign_id: number;
+  client_id: number;
+  profile_diagnostic_id: number | null;
+  status: "pending" | "running" | "completed" | "failed" | "cancelled";
+  current_step: string | null;
+  error_message: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  artifacts: CampaignArtifact[];
+  events: CampaignPipelineEvent[];
+}
+
+export interface CampaignPipelineEvent {
+  id: number;
+  campaign_id: number | null;
+  pipeline_run_id: number | null;
+  step_key: string | null;
+  event_type: string;
+  severity: "info" | "warning" | "error";
+  message: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
 }
 
 export interface CreativeHistoryItem {
@@ -166,6 +279,8 @@ export interface Agent {
   system_prompt: string;
   prompt_template: string;
   output_schema_json: string;
+  contract_key: string | null;
+  contract_version: string | null;
   is_active: boolean;
   execution_order: number;
   created_at: string;
@@ -207,6 +322,9 @@ export interface AgentExecutionLog {
   agent_key: string | null;
   context_warning: string | null;
   latency_ms: number | null;
+  pipeline_run_id: number | null;
+  agent_version_id: number | null;
+  step_key: string | null;
   created_at: string;
 }
 

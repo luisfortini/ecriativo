@@ -1,7 +1,9 @@
 import { all, get, run } from "../db/connection.js";
+import { profileDiagnosticToLegacy, type ProfileDiagnostic } from "../contracts/index.js";
 import type { BrandAnalysisOutput, ClientAsset, ClientBrandAnalysis, ClientProfile } from "../types.js";
 import { executeAgentByKey } from "./agentService.js";
 import { getClient, listClientAssets, updateClientAssetAnalysis } from "./clientService.js";
+import { saveActiveProfileDiagnostic } from "./profileDiagnosticService.js";
 
 interface AnalyzeInput {
   site_url?: string;
@@ -54,22 +56,39 @@ export async function analyzeClientBrand(clientId: number, input: AnalyzeInput) 
     ]
   };
 
-  const run = await executeAgentByKey<BrandAnalysisOutput>("brand_analyzer_agent", context, { clientId });
-  const analysis = await saveAnalysis(clientId, sources, assets, run.parsed);
+  const agentRun = await executeAgentByKey<ProfileDiagnostic>("brand_analyzer_agent", context, {
+    clientId,
+    stepKey: "profile_diagnostic"
+  });
+  const legacyOutput = profileDiagnosticToLegacy(agentRun.parsed);
+  const analysis = await saveAnalysis(clientId, sources, assets, legacyOutput);
+  const profileDiagnostic = await saveActiveProfileDiagnostic({
+    clientId,
+    payload: agentRun.parsed,
+    sourceSnapshot: {
+      sources: sources.map((source) => ({ type: source.type, url: source.url, status: source.status })),
+      asset_ids: assets.map((asset) => asset.id),
+      manual_notes: input.manual_notes ?? ""
+    },
+    agentId: agentRun.agent.id,
+    agentVersionId: agentRun.agent_version_id,
+    executionLogId: agentRun.execution_log_id
+  });
 
   await Promise.all(assets.map((asset) =>
     updateClientAssetAnalysis(asset.id, {
       analysis_status: "analyzed",
-      ai_summary: buildAssetSummary(asset, run.parsed),
-      dominant_colors_json: JSON.stringify(run.parsed.color_palette ?? []),
-      visual_style_tags_json: JSON.stringify(run.parsed.approved_style_suggestions ?? [])
+      ai_summary: buildAssetSummary(asset, legacyOutput),
+      dominant_colors_json: JSON.stringify(legacyOutput.color_palette ?? []),
+      visual_style_tags_json: JSON.stringify(legacyOutput.approved_style_suggestions ?? [])
     })
   ));
 
   return {
     analysis,
-    suggestions: run.parsed,
-    comparison: buildComparison(client, run.parsed)
+    profile_diagnostic: profileDiagnostic,
+    suggestions: legacyOutput,
+    comparison: buildComparison(client, legacyOutput)
   };
 }
 

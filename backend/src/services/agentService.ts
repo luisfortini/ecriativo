@@ -1,6 +1,15 @@
 import OpenAI from "openai";
 import type { ResponseTextConfig } from "openai/resources/responses/responses";
+import type { TSchema } from "@sinclair/typebox";
+import { Value } from "@sinclair/typebox/value";
 import { config } from "../config.js";
+import {
+  CREATIVE_BRIEF_SCHEMA_VERSION,
+  CREATIVE_OUTPUT_SCHEMA_VERSION,
+  PROFILE_DIAGNOSTIC_SCHEMA_VERSION,
+  resolveContractSchema,
+  validateAgentContractBinding
+} from "../contracts/index.js";
 import { all, get, run, toPostgresBoolean } from "../db/connection.js";
 import type { AgentExecutionLog, AgentKey, AgentRecord, AgentVersionRecord } from "../types.js";
 import { recordAiUsage, type AiOperationType } from "./aiCostService.js";
@@ -8,7 +17,20 @@ import { sendAgentErrorAsync } from "./whatsappNotificationService.js";
 
 const client = config.openaiApiKey ? new OpenAI({ apiKey: config.openaiApiKey, timeout: config.openaiTimeoutMs }) : null;
 
-type AgentPayload = Omit<AgentRecord, "id" | "created_at" | "updated_at" | "is_active"> & { is_active: boolean | number; change_notes?: string };
+type AgentPayload = Omit<
+  AgentRecord,
+  "id" | "created_at" | "updated_at" | "is_active" | "contract_key" | "contract_version"
+> & { is_active: boolean | number; change_notes?: string };
+
+type AgentExecutionOptions = {
+  campaignId?: number | null;
+  clientId?: number | null;
+  campaignPlanId?: number | null;
+  queueId?: number | null;
+  pipelineRunId?: number | null;
+  stepKey?: string | null;
+  operationType?: AiOperationType;
+};
 
 export async function listAgents() {
   return all<AgentRecord>("SELECT * FROM agents ORDER BY execution_order ASC, name ASC");
@@ -48,7 +70,12 @@ export async function createAgent(payload: AgentPayload) {
 }
 
 export async function updateAgent(id: number, payload: AgentPayload) {
-  parseSchema(payload.output_schema_json);
+  const current = await get<AgentRecord>("SELECT * FROM agents WHERE id = ?", [id]);
+  if (!current) throw new Error("Agente nao encontrado.");
+  const outputSchemaJson = current.contract_key && current.contract_version
+    ? JSON.stringify(validateAgentContractBinding(current.key, current.contract_key, current.contract_version), null, 2)
+    : payload.output_schema_json;
+  parseSchema(outputSchemaJson);
   await run(
     `UPDATE agents SET
       name = @name,
@@ -65,7 +92,7 @@ export async function updateAgent(id: number, payload: AgentPayload) {
       execution_order = @execution_order,
       updated_at = CURRENT_TIMESTAMP
     WHERE id = @id`,
-    { id, ...cleanAgent(payload) }
+    { id, ...cleanAgent(payload, outputSchemaJson) }
   );
   await createVersion(id, payload.change_notes || "Alteracao salva pela Central de Agentes");
   return getAgent(id);
@@ -127,7 +154,7 @@ export async function compareAgentVersion(agentId: number, versionId: number) {
 export async function executeAgentByKey<T>(
   key: AgentKey,
   context: unknown,
-  options?: { campaignId?: number | null; clientId?: number | null; campaignPlanId?: number | null; queueId?: number | null; operationType?: AiOperationType }
+  options?: AgentExecutionOptions
 ) {
   return executeAgent<T>(await getActiveAgent(key), context, options);
 }
@@ -135,9 +162,10 @@ export async function executeAgentByKey<T>(
 export async function executeAgent<T>(
   agent: AgentRecord,
   context: unknown,
-  options?: { campaignId?: number | null; clientId?: number | null; campaignPlanId?: number | null; queueId?: number | null; operationType?: AiOperationType }
+  options?: AgentExecutionOptions
 ) {
-  const schema = parseSchema(agent.output_schema_json);
+  const schema = resolveAgentSchema(agent);
+  const agentVersionId = await getCurrentAgentVersionId(agent.id);
   const input = buildAgentInput(agent, context);
   const started = Date.now();
   let outputRaw = "";
@@ -185,6 +213,9 @@ export async function executeAgent<T>(
       clientId: options?.clientId ?? null,
       campaignPlanId: options?.campaignPlanId ?? null,
       queueId: options?.queueId ?? null,
+      pipelineRunId: options?.pipelineRunId ?? null,
+      agentVersionId,
+      stepKey: options?.stepKey ?? null,
       operationType: options?.operationType ?? operationTypeForAgent(agent.key),
       inputJson: JSON.stringify(input, null, 2),
       outputRaw,
@@ -207,7 +238,8 @@ export async function executeAgent<T>(
     parsed: parsed as T,
     schema_errors: [] as string[],
     execution_log_id: (input as typeof input & { execution_log_id?: number }).execution_log_id,
-    ai_usage_log_id: (input as typeof input & { ai_usage_log_id?: number }).ai_usage_log_id
+    ai_usage_log_id: (input as typeof input & { ai_usage_log_id?: number }).ai_usage_log_id,
+    agent_version_id: agentVersionId
   };
 }
 
@@ -261,6 +293,9 @@ async function saveExecutionLog(input: {
   clientId: number | null;
   campaignPlanId: number | null;
   queueId: number | null;
+  pipelineRunId: number | null;
+  agentVersionId: number | null;
+  stepKey: string | null;
   operationType: AiOperationType;
   inputJson: string;
   outputRaw: string | null;
@@ -278,8 +313,8 @@ async function saveExecutionLog(input: {
     `INSERT INTO agent_execution_logs (
       agent_id, campaign_id, client_id, input_json, output_raw, output_parsed_json,
       status, error_message, tokens_input, tokens_output, total_tokens, context_chars, tamanho_contexto_caracteres,
-      agent_key, context_warning, latency_ms
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      agent_key, context_warning, latency_ms, pipeline_run_id, agent_version_id, step_key
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       input.agentId,
       input.campaignId,
@@ -296,7 +331,10 @@ async function saveExecutionLog(input: {
       input.contextChars,
       input.agentKey,
       contextWarning,
-      input.latencyMs
+      input.latencyMs,
+      input.pipelineRunId,
+      input.agentVersionId,
+      input.stepKey
     ]
   );
   const executionLogId = Number(result.lastInsertRowid);
@@ -398,7 +436,7 @@ function isEmptyObject(value: unknown) {
   return isPlainObject(value) && Object.keys(value as Record<string, unknown>).length === 0;
 }
 
-function jsonFormat(name: string, schema: { [key: string]: unknown }): ResponseTextConfig {
+function jsonFormat(name: string, schema: TSchema): ResponseTextConfig {
   return {
     format: {
       type: "json_schema",
@@ -409,7 +447,7 @@ function jsonFormat(name: string, schema: { [key: string]: unknown }): ResponseT
   };
 }
 
-function callOpenAI(agent: AgentRecord, prompt: string, schema: { [key: string]: unknown }, omitOutputLimit: boolean) {
+function callOpenAI(agent: AgentRecord, prompt: string, schema: TSchema, omitOutputLimit: boolean) {
   if (!client) throw new Error("OpenAI nao configurada.");
   return client.responses.create({
     model: agent.model,
@@ -429,20 +467,34 @@ function isLikelyTruncatedJson(error: unknown) {
 }
 
 function parseSchema(value: string) {
-  const parsed = JSON.parse(value) as { [key: string]: unknown };
+  const parsed = JSON.parse(value) as TSchema;
   if (parsed.type !== "object") throw new Error("output_schema_json deve ser um JSON Schema de objeto.");
   return parsed;
 }
 
-function validateAgainstSchema(value: unknown, schema: { [key: string]: unknown }) {
-  const errors: string[] = [];
-  if (!value || typeof value !== "object" || Array.isArray(value)) return ["Resposta nao e um objeto JSON."];
-  const object = value as Record<string, unknown>;
-  const required = Array.isArray(schema.required) ? (schema.required as string[]) : [];
-  required.forEach((field) => {
-    if (object[field] === undefined || object[field] === null || object[field] === "") errors.push(`Campo obrigatorio ausente: ${field}`);
-  });
-  return errors;
+function resolveAgentSchema(agent: AgentRecord): TSchema {
+  if (Boolean(agent.contract_key) !== Boolean(agent.contract_version)) {
+    throw new Error(`Vinculo de contrato incompleto para o agente ${agent.key}.`);
+  }
+  if (agent.contract_key && agent.contract_version) {
+    return validateAgentContractBinding(agent.key, agent.contract_key, agent.contract_version);
+  }
+  return parseSchema(agent.output_schema_json);
+}
+
+async function getCurrentAgentVersionId(agentId: number) {
+  const version = await get<{ id: number }>(
+    "SELECT id FROM agent_versions WHERE agent_id = ? ORDER BY version_number DESC LIMIT 1",
+    [agentId]
+  );
+  return version ? Number(version.id) : null;
+}
+
+function validateAgainstSchema(value: unknown, schema: TSchema) {
+  if (Value.Check(schema, value)) return [];
+  return [...Value.Errors(schema, value)]
+    .slice(0, 10)
+    .map((error) => `${error.path || "/"}: ${error.message}`);
 }
 
 function localAgentResponse<T>(key: string, context: unknown) {
@@ -450,6 +502,8 @@ function localAgentResponse<T>(key: string, context: unknown) {
     briefing_normalizado?: Record<string, unknown>;
     estrategia?: Record<string, unknown>;
     estrategia_objetiva?: Record<string, unknown>;
+    creative_brief?: Record<string, unknown>;
+    profile_diagnostic?: Record<string, unknown>;
     client_prompt_context?: Record<string, unknown>;
     offer?: string;
     target_audience?: string;
@@ -476,75 +530,94 @@ function localAgentResponse<T>(key: string, context: unknown) {
     const sourceText = data.sources?.map((source) => source.text ?? "").join(" ").slice(0, 800) ?? "";
     const materials = data.uploaded_materials?.map((asset) => `${asset.type} ${asset.description ?? ""} ${asset.user_feedback ?? ""}`).join("; ") ?? "";
     return {
-      brand_voice: data.client?.brand_voice || inferFromText(sourceText, "consultivo, claro e profissional"),
+      schemaVersion: PROFILE_DIAGNOSTIC_SCHEMA_VERSION,
+      brandVoice: data.client?.brand_voice || inferFromText(sourceText, "consultivo, claro e profissional"),
       positioning: `Marca percebida como ${data.client?.segment || "negocio"} com comunicacao voltada a clareza e confianca.`,
-      target_audience: data.client?.target_audience || "Publico provavel identificado a partir dos materiais enviados.",
-      color_palette: data.client?.color_palette ? data.client.color_palette.split(",").map((item) => item.trim()) : ["cores principais a confirmar"],
-      visual_style: materials || "Estilo visual a confirmar com mais referencias; usar composicao limpa, legivel e consistente.",
-      content_patterns: ["apresentacao de oferta", "prova visual da marca", "chamadas diretas"],
-      common_ctas: ["Saiba mais", "Fale conosco", "Solicite uma proposta"],
-      recurring_words: sourceText.split(/\s+/).filter((word) => word.length > 5).slice(0, 8),
-      approved_style_suggestions: ["Manter elementos visuais consistentes com materiais aprovados", "Priorizar clareza e hierarquia"],
-      forbidden_style_suggestions: ["Evitar estilos marcados como reprovados", "Evitar poluicao visual e textos pequenos"],
-      strategic_notes: "Analise local gerada com base nos dados disponiveis; revisar antes de aplicar ao perfil.",
-      confidence_score: sourceText || materials ? 0.55 : 0.25,
-      missing_information: sourceText || materials ? [] : ["Informe site, Instagram ou materiais de referencia para aumentar a confianca."]
+      targetAudience: data.client?.target_audience || "Publico provavel identificado a partir dos materiais enviados.",
+      colorPalette: data.client?.color_palette ? data.client.color_palette.split(",").map((item) => item.trim()) : ["cores principais a confirmar"],
+      visualStyle: materials || "Estilo visual a confirmar com mais referencias; usar composicao limpa, legivel e consistente.",
+      contentPatterns: ["apresentacao de oferta", "prova visual da marca", "chamadas diretas"],
+      commonCtas: ["Saiba mais", "Fale conosco", "Solicite uma proposta"],
+      recurringWords: sourceText.split(/\s+/).filter((word) => word.length > 5).slice(0, 8),
+      approvedStyleSuggestions: ["Manter elementos visuais consistentes com materiais aprovados", "Priorizar clareza e hierarquia"],
+      forbiddenStyleSuggestions: ["Evitar estilos marcados como reprovados", "Evitar poluicao visual e textos pequenos"],
+      strategicNotes: "Analise local gerada com base nos dados disponiveis; revisar antes de aplicar ao perfil.",
+      confidenceScore: sourceText || materials ? 0.55 : 0.25,
+      missingInformation: sourceText || materials ? [] : ["Informe site, Instagram ou materiais de referencia para aumentar a confianca."]
     } as T;
   }
 
   if (key === "creative_agent") {
-    const briefing = (data.briefing_normalizado ?? data.client_prompt_context ?? data) as Record<string, unknown>;
-    const strategy = data.estrategia_objetiva ?? data.estrategia ?? {};
-    const creativeBrief = formatCreativeBriefing(strategy.briefing_criativo);
+    const brief = (data.creative_brief ?? data.estrategia_objetiva ?? data.estrategia ?? {}) as Record<string, unknown>;
+    const visual = isObject(brief.visualDirection) ? brief.visualDirection : {};
     return {
-      prompt_imagem: `${creativeBrief || "Criativo publicitario"}. Direcao visual alinhada a ${String(briefing.tom_de_voz ?? briefing.brand_voice ?? "marca")}, paleta ${String(briefing.paleta_de_cores ?? briefing.color_palette ?? "institucional")}.`,
-      negative_prompt: `baixa resolucao, texto distorcido, logos inventados, ${(briefing as Record<string, unknown>).cores_proibidas ?? ""}, ${(briefing as Record<string, unknown>).estilo_visual_proibido ?? ""}`,
-      direcao_visual_resumida: `Estilo visual baseado no briefing criativo e na memoria do cliente.`
+      schemaVersion: CREATIVE_OUTPUT_SCHEMA_VERSION,
+      imagePrompt: `${String(brief.imageInstructions ?? "Criativo publicitario")}. Conceito: ${String(visual.concept ?? "")}. Composicao: ${String(visual.composition ?? "")}.`,
+      negativePrompt: `baixa resolucao, texto distorcido, logos inventados, ${listText(brief.restrictions)}, ${listText(visual.avoid)}`,
+      visualDirectionSummary: String(visual.concept ?? "Estilo visual baseado no Creative Brief e na memoria do cliente."),
+      brandOverlay: {
+        logoRequired: true,
+        preferredPosition: "bottom_right",
+        sizePercent: 14
+      }
     } as T;
   }
 
+  const briefing = (data.briefing_normalizado ?? data) as Record<string, unknown>;
+  const promptContext = isObject(briefing.client_prompt_context) ? briefing.client_prompt_context : data.client_prompt_context ?? {};
+  const targetAudience = String(briefing.target_audience ?? promptContext.publico_alvo_principal ?? data.target_audience ?? "publico de teste");
+  const objective = String(briefing.objective ?? data.objective ?? "gerar interesse pela oferta");
+  const offer = String(briefing.offer ?? data.offer ?? "Oferta");
+  const restrictions = splitList(briefing.restrictions ?? promptContext.restricoes_comunicacao);
+  const forbiddenStyles = splitList(briefing.forbidden_styles ?? promptContext.estilo_visual_proibido);
   return {
-    angulo: `Transformar ${String(data.offer ?? "a oferta")} em decisao simples para ${String(data.target_audience ?? "o publico")}.`,
-    publico: String(data.target_audience ?? "publico de teste"),
-    promessa: `Ajudar ${String(data.target_audience ?? "o publico")} a avancar em ${String(data.objective ?? "seu objetivo")}.`,
-    headline: `${String(data.offer ?? "Oferta")} para ${String(data.client?.segment ?? data.client?.name ?? "o cliente")}`,
-    texto_principal: `Campanha alinhada a memoria criativa do cliente e ao briefing atual.`,
-    cta: (String(data.preferred_ctas || "Conheca a oferta").split("\n")[0] || "Conheca a oferta").replace(/^- /, ""),
-    briefing_criativo: {
-      conceito: `Anuncio ${String(data.format ?? "1:1")} para ${String(data.offer ?? "a oferta")}.`,
-      emocao: "Confianca e clareza.",
-      composicao: "Hierarquia visual simples com foco na promessa principal.",
-      paleta: String(data.color_palette ?? data.client_prompt_context?.paleta_de_cores ?? "da marca").split(",").map((item) => item.trim()).filter(Boolean).slice(0, 5),
-      elementos_visuais: ["produto ou servico em destaque", "elementos da identidade visual"],
-      hierarquia: "Headline, prova visual, CTA.",
-      evitar: String(data.forbidden_styles ?? data.client_prompt_context?.estilo_visual_proibido ?? "poluicao visual").split(",").map((item) => item.trim()).filter(Boolean).slice(0, 5)
-    }
+    schemaVersion: CREATIVE_BRIEF_SCHEMA_VERSION,
+    campaignObjective: objective,
+    targetAudience,
+    funnelStage: "consideracao",
+    communicationAngle: `Transformar ${offer} em uma decisao simples para ${targetAudience}.`,
+    mainPromise: `Ajudar ${targetAudience} a avancar em ${objective}.`,
+    centralBenefit: `Clareza sobre o valor de ${offer}.`,
+    objectionAddressed: "Reduzir incerteza e facilitar a decisao.",
+    headline: `${offer} para ${String(data.client?.segment ?? data.client?.name ?? "o cliente")}`,
+    subheadline: `Uma proposta clara e alinhada ao que ${targetAudience} precisa.`,
+    callToAction: (String(briefing.preferred_ctas ?? data.preferred_ctas ?? "Conheca a oferta").split("\n")[0] || "Conheca a oferta").replace(/^- /, ""),
+    toneOfVoice: String(briefing.brand_voice ?? promptContext.tom_de_voz ?? "claro e profissional"),
+    allowedTriggers: ["clareza", "beneficio", "confianca"],
+    restrictions,
+    visualDirection: {
+      concept: `Anuncio ${String(briefing.format ?? data.format ?? "1:1")} para ${offer}.`,
+      emotion: "Confianca e clareza.",
+      composition: "Hierarquia visual simples com foco na promessa principal.",
+      colorPalette: splitList(briefing.color_palette ?? promptContext.paleta_de_cores ?? "cores da marca").slice(0, 5),
+      visualElements: ["produto ou servico em destaque", "elementos da identidade visual"],
+      avoid: forbiddenStyles.length ? forbiddenStyles : ["poluicao visual", "texto ilegivel"]
+    },
+    elementHierarchy: ["headline", "beneficio principal", "prova visual", "CTA"],
+    imageInstructions: "Criar composicao publicitaria legivel, consistente com a identidade visual e pronta para midia paga.",
+    adCaption: `${offer}: uma proposta clara para ${targetAudience}. ${objective}. Conheca a oferta.`,
+    captionInstructions: "Apresentar a promessa principal com clareza, explicar o beneficio central e finalizar com o CTA."
   } as T;
 }
 
-function formatCreativeBriefing(value: unknown) {
-  if (!value) return "";
-  if (typeof value === "string") return value;
-  if (typeof value !== "object" || Array.isArray(value)) return String(value);
-  const item = value as Record<string, unknown>;
-  return [
-    item.conceito,
-    item.emocao ? `Emocao: ${String(item.emocao)}` : "",
-    item.composicao ? `Composicao: ${String(item.composicao)}` : "",
-    Array.isArray(item.paleta) && item.paleta.length ? `Paleta: ${item.paleta.join(", ")}` : "",
-    Array.isArray(item.elementos_visuais) && item.elementos_visuais.length ? `Elementos: ${item.elementos_visuais.join(", ")}` : "",
-    item.hierarquia ? `Hierarquia: ${String(item.hierarquia)}` : "",
-    Array.isArray(item.evitar) && item.evitar.length ? `Evitar: ${item.evitar.join(", ")}` : ""
-  ]
-    .filter(Boolean)
-    .join(". ");
+function isObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function splitList(value: unknown) {
+  if (Array.isArray(value)) return value.map(String).map((item) => item.trim()).filter(Boolean);
+  return String(value ?? "").split(/[,\n]/).map((item) => item.replace(/^- /, "").trim()).filter(Boolean);
+}
+
+function listText(value: unknown) {
+  return splitList(value).join(", ");
 }
 
 function inferFromText(text: string, fallback: string) {
   return text.trim() ? fallback : fallback;
 }
 
-function cleanAgent(payload: AgentPayload) {
+function cleanAgent(payload: AgentPayload, outputSchemaJson = payload.output_schema_json) {
   return {
     name: payload.name,
     key: payload.key,
@@ -555,7 +628,7 @@ function cleanAgent(payload: AgentPayload) {
     max_tokens: payload.max_tokens ?? null,
     system_prompt: payload.system_prompt,
     prompt_template: payload.prompt_template,
-    output_schema_json: payload.output_schema_json,
+    output_schema_json: outputSchemaJson,
     is_active: toPostgresBoolean(payload.is_active),
     execution_order: payload.execution_order ?? 1
   };

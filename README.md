@@ -1,10 +1,14 @@
 # e-Criativo
 
-MVP web para gerar anúncios com IA em fluxo de dois agentes:
+Plataforma web para gerar campanhas e peças com pipeline de IA estruturado:
 
+- Agente Analista de Marca: produz o diagnóstico reutilizável do cliente.
 - Agente Estrategista: estratégia, copy, ângulo, headline, CTA e briefing visual.
-- Agente Criativo: transforma o briefing em prompt final de imagem e direção visual.
+- Agente Criativo: transforma o Creative Brief em instruções de imagem e Brand Overlay.
+- Brand Overlay: aplica a logo oficial depois da geração, sem pedir que a IA recrie a marca.
 - Memória por cliente: perfil estratégico, identidade visual, assets, restrições, histórico e aprendizados reutilizados em novas campanhas.
+
+Consulte a [Arquitetura Funcional de IA](docs/arquitetura-funcional-ia.md) para a especificação completa dos agentes, contratos, memória, pipeline, persistência e restrições de prompts.
 
 ## Stack
 
