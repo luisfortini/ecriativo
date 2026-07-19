@@ -267,14 +267,18 @@ export async function failCampaignPipelineRun(pipelineRunId: number, error: unkn
 async function assertPipelineReferences(campaignId: number, clientId: number, profileDiagnosticId: number | null) {
   const campaign = await get<{ client_id: number | null }>("SELECT client_id FROM campaigns WHERE id = ?", [campaignId]);
   if (!campaign) throw new Error("Campanha nao encontrada.");
-  if (Number(campaign.client_id) !== clientId) throw new Error("A campanha nao pertence ao cliente informado.");
+  const normalizedClientId = Number(clientId);
+  if (!Number.isSafeInteger(normalizedClientId) || normalizedClientId <= 0) {
+    throw new Error("Cliente informado para o pipeline e invalido.");
+  }
+  if (Number(campaign.client_id) !== normalizedClientId) throw new Error("A campanha nao pertence ao cliente informado.");
   if (!profileDiagnosticId) return;
 
   const diagnostic = await get<{ client_id: number; status: string }>(
     "SELECT client_id, status FROM client_profile_diagnostics WHERE id = ?",
     [profileDiagnosticId]
   );
-  if (!diagnostic || Number(diagnostic.client_id) !== clientId) {
+  if (!diagnostic || Number(diagnostic.client_id) !== normalizedClientId) {
     throw new Error("O diagnostico nao pertence ao cliente informado.");
   }
   if (diagnostic.status !== "active") throw new Error("Somente um diagnostico ativo pode iniciar um pipeline.");

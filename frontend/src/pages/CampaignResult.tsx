@@ -75,6 +75,17 @@ export function CampaignResult() {
   if (loading) return <LoadingBlock label="Carregando resultado..." />;
   if (error) return <ErrorBanner message={error} />;
   if (!campaign) return null;
+  if (campaign.status === "failed") {
+    return (
+      <>
+        <PageHeader
+          title={campaign.cliente}
+          description={`${campaign.segmento || "Sem segmento"} · ${campaign.formato || "1:1"} · ${new Date(campaign.created_at).toLocaleString("pt-BR")}`}
+        />
+        <ErrorBanner message={campaign.error_message || "A geracao desta campanha falhou antes de produzir o resultado."} />
+      </>
+    );
+  }
   const officialBrief = campaign.pipeline_run?.artifacts
     .filter((artifact) => artifact.artifact_type === "creative_brief" && artifact.status === "completed")
     .slice(-1)[0]?.payload as CreativeBriefArtifact | undefined;
@@ -238,7 +249,8 @@ function buildAdCaption(campaign: CampaignDetail, officialBrief?: CreativeBriefA
   return caption.trim() || text.trim();
 }
 
-function formatCreativeBriefing(value: CampaignDetail["strategy"]["briefing_criativo"]) {
+function formatCreativeBriefing(value: CampaignDetail["strategy"]["briefing_criativo"] | null | undefined) {
+  if (!value) return "Briefing criativo ainda nao disponivel.";
   if (typeof value === "string") return value;
   return [
     value.conceito,

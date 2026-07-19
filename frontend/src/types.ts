@@ -159,6 +159,7 @@ export interface NormalizedBriefing {
 }
 
 export interface CampaignDetail extends CampaignSummary {
+  error_message: string | null;
   free_briefing: string | null;
   publico_alvo: string | null;
   oferta: string | null;

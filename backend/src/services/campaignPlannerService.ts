@@ -256,13 +256,18 @@ async function processQueueItem(item: QueueItem) {
   running += 1;
   const started = new Date().toISOString();
   try {
+    // O driver pg devolve BIGINT como string em runtime. Normalize na fronteira
+    // da fila para nao propagar IDs com tipos diferentes pelo pipeline.
+    const clientId = Number(item.client_id);
+    if (!Number.isSafeInteger(clientId) || clientId <= 0) throw new Error("Cliente invalido no item da fila.");
+
     await run("UPDATE campaign_generation_queue SET status = 'processing', started_at = ?, attempt_count = attempt_count + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?", [
       started,
       item.id
     ]);
     const plan = await get<PlannerPlan>("SELECT * FROM campaign_plans WHERE id = ?", [item.campaign_plan_id]);
     if (!plan) throw new Error("Planejamento nao encontrado.");
-    const client = await getClient(item.client_id);
+    const client = await getClient(clientId);
     if (!client) throw new Error("Cliente nao encontrado.");
 
     const history = await all(
@@ -271,12 +276,12 @@ async function processQueueItem(item: QueueItem) {
          WHERE client_id = ? AND free_briefing LIKE ?
          ORDER BY created_at DESC
          LIMIT 8`,
-      [item.client_id, `%${plan.theme}%`]
+      [clientId, `%${plan.theme}%`]
     );
 
     const campaign = await createCampaign(
       {
-        client_id: item.client_id,
+        client_id: clientId,
         free_briefing: buildAutoBriefing(plan, item, history),
         objetivo: plan.objective,
         oferta: plan.theme,
