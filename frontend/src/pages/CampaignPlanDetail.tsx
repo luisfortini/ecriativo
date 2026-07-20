@@ -1,4 +1,4 @@
-import { Ban, Eye, Pause, Play, RotateCcw, Zap } from "lucide-react";
+import { Ban, Check, Eye, LoaderCircle, Pause, Play, RotateCcw, Zap } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ErrorBanner } from "../components/ErrorBanner";
@@ -7,11 +7,25 @@ import { PageHeader } from "../components/PageHeader";
 import { campaignPlanAction, getCampaignPlan } from "../services/api";
 import type { CampaignPlan } from "../types";
 
+type PlanActionName = "activate" | "pause" | "resume" | "cancel-pending" | "retry-failures" | "generate-now";
+
+const actionFeedback: Record<PlanActionName, { pending: string; completed: string; message: string }> = {
+  activate: { pending: "Ativando...", completed: "Ativado", message: "Planejamento ativado e fila preparada." },
+  pause: { pending: "Pausando...", completed: "Pausado", message: "Planejamento pausado." },
+  resume: { pending: "Retomando...", completed: "Retomado", message: "Planejamento retomado." },
+  "cancel-pending": { pending: "Cancelando...", completed: "Cancelados", message: "Itens pendentes cancelados." },
+  "retry-failures": { pending: "Reprocessando...", completed: "Reenfileiradas", message: "Falhas reenfileiradas para uma nova tentativa." },
+  "generate-now": { pending: "Liberando...", completed: "Liberado", message: "Itens pendentes liberados para execucao agora." }
+};
+
 export function CampaignPlanDetail() {
   const { id } = useParams();
   const [plan, setPlan] = useState<CampaignPlan | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [pendingAction, setPendingAction] = useState<PlanActionName | null>(null);
+  const [completedAction, setCompletedAction] = useState<PlanActionName | null>(null);
 
   function load() {
     if (!id) return;
@@ -20,26 +34,42 @@ export function CampaignPlanDetail() {
 
   useEffect(load, [id]);
 
-  async function action(name: string) {
+  async function action(name: PlanActionName) {
     if (!plan) return;
-    setPlan(await campaignPlanAction(plan.id, name));
+    setError("");
+    setMessage("");
+    setCompletedAction(null);
+    setPendingAction(name);
+    try {
+      setPlan(await campaignPlanAction(plan.id, name));
+      setCompletedAction(name);
+      setMessage(actionFeedback[name].message);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Nao foi possivel executar a acao.");
+    } finally {
+      setPendingAction(null);
+    }
   }
 
   if (loading) return <LoadingBlock label="Carregando planejamento..." />;
-  if (error) return <ErrorBanner message={error} />;
+  if (error && !plan) return <ErrorBanner message={error} />;
   if (!plan) return null;
 
   return (
     <>
       <PageHeader title={plan.name} description={`${plan.theme} · ${plan.status} · ${plan.start_date} ate ${plan.end_date}`} />
       <div className="mb-5 flex flex-wrap gap-2">
-        <Action icon={<Play size={15} />} label="Ativar" onClick={() => action("activate")} />
-        <Action icon={<Pause size={15} />} label="Pausar planejamento" onClick={() => action("pause")} />
-        <Action icon={<Play size={15} />} label="Retomar planejamento" onClick={() => action("resume")} />
-        <Action icon={<Ban size={15} />} label="Cancelar itens pendentes" onClick={() => action("cancel-pending")} />
-        <Action icon={<RotateCcw size={15} />} label="Reprocessar falhas" onClick={() => action("retry-failures")} />
-        <Action icon={<Zap size={15} />} label="Gerar agora" onClick={() => action("generate-now")} />
+        <Action icon={<Play size={15} />} label="Ativar" action="activate" pendingAction={pendingAction} completedAction={completedAction} onClick={() => action("activate")} />
+        <Action icon={<Pause size={15} />} label="Pausar planejamento" action="pause" pendingAction={pendingAction} completedAction={completedAction} onClick={() => action("pause")} />
+        <Action icon={<Play size={15} />} label="Retomar planejamento" action="resume" pendingAction={pendingAction} completedAction={completedAction} onClick={() => action("resume")} />
+        <Action icon={<Ban size={15} />} label="Cancelar itens pendentes" action="cancel-pending" pendingAction={pendingAction} completedAction={completedAction} onClick={() => action("cancel-pending")} />
+        <Action icon={<RotateCcw size={15} />} label="Reprocessar falhas" action="retry-failures" pendingAction={pendingAction} completedAction={completedAction} onClick={() => action("retry-failures")} />
+        <Action icon={<Zap size={15} />} label="Gerar agora" action="generate-now" pendingAction={pendingAction} completedAction={completedAction} onClick={() => action("generate-now")} />
         <Link className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700" to={`/fila-geracao?plan_id=${plan.id}`}><Eye size={15} />Visualizar fila</Link>
+      </div>
+      <div aria-live="polite" className="mb-5">
+        {error && <ErrorBanner message={error} />}
+        {message && <div className="rounded-md border border-accent/30 bg-accent-soft px-4 py-3 text-sm font-semibold text-accent-hover">{message}</div>}
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[1fr_380px]">
@@ -82,8 +112,40 @@ export function CampaignPlanDetail() {
   );
 }
 
-function Action({ icon, label, onClick }: { icon: React.ReactNode; label: string; onClick: () => void }) {
-  return <button className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700" type="button" onClick={onClick}>{icon}{label}</button>;
+function Action({
+  icon,
+  label,
+  action,
+  pendingAction,
+  completedAction,
+  onClick
+}: {
+  icon: React.ReactNode;
+  label: string;
+  action: PlanActionName;
+  pendingAction: PlanActionName | null;
+  completedAction: PlanActionName | null;
+  onClick: () => void;
+}) {
+  const pending = pendingAction === action;
+  const completed = completedAction === action;
+  const disabled = pendingAction !== null;
+  return (
+    <button
+      className={`inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm font-semibold transition ${
+        completed
+          ? "border-accent/40 bg-accent-soft text-accent-hover"
+          : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+      } disabled:cursor-wait disabled:opacity-60`}
+      type="button"
+      disabled={disabled}
+      aria-busy={pending}
+      onClick={onClick}
+    >
+      {pending ? <LoaderCircle className="animate-spin" size={15} /> : completed ? <Check size={15} /> : icon}
+      {pending ? actionFeedback[action].pending : completed ? actionFeedback[action].completed : label}
+    </button>
+  );
 }
 
 function Info({ label, value }: { label: string; value: string }) {
