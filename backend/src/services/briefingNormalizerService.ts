@@ -28,7 +28,7 @@ export async function normalizeBriefing(input: NewCampaignInput, client: ClientP
     format: input.formato,
     target_audience: pick(input.publico_alvo, client.target_audience),
     brand_voice: pick(input.tom_marca, client.brand_voice || latestAnalysis.brand_voice),
-    color_palette: pick(input.paleta_cores, client.color_palette || latestAnalysis.color_palette),
+    color_palette: pick(input.paleta_cores, client.color_palette || latestAnalysis.color_palette, extractedPalette),
     visual_references: pick(input.referencias_visuais, client.visual_references || latestAnalysis.visual_style),
     restrictions: pick(input.restricoes, client.communication_restrictions),
     observations: input.observacoes?.trim() || "",

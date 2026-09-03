@@ -1,5 +1,8 @@
 import dotenv from "dotenv";
 import { Pool } from "pg";
+import type { CreativeBrief, CreativeOutput } from "../contracts/index.js";
+import type { PlannerPlan } from "../services/campaignPlannerService.js";
+import type { NormalizedBriefing } from "../types.js";
 
 dotenv.config();
 dotenv.config({ path: "backend/.env", override: false });
@@ -22,16 +25,57 @@ async function main() {
     delete process.env.ADMIN_EMAIL;
     delete process.env.ADMIN_PASSWORD;
 
-    const [{ migrate }, db, costs, planner, campaigns, promptContext] = await Promise.all([
+    const [{ migrate }, db, costs, planner, campaigns, promptContext, zoned] = await Promise.all([
       import("../db/migrate.js"),
       import("../db/connection.js"),
       import("../services/aiCostService.js"),
       import("../services/campaignPlannerService.js"),
       import("../services/campaignService.js"),
-      import("../services/clientPromptContextService.js")
+      import("../services/clientPromptContextService.js"),
+      import("../utils/zonedDateTime.js")
     ]);
     applicationPool = db.pool;
     await migrate();
+
+    const timezonePlan: PlannerPlan = {
+      id: 999,
+      name: "Fuso Smoke",
+      theme: "Fuso",
+      strategic_description: null,
+      objective: "Validar fuso",
+      start_date: "2026-09-02",
+      end_date: "2026-09-03",
+      recurrence_type: "once",
+      recurrence_days_json: "[0,1,2,3,4,5,6]",
+      preferred_time: "09:00",
+      ads_per_client: 3,
+      ad_format: "1:1",
+      max_ads_per_day: 30,
+      max_ads_per_hour: 50,
+      min_interval_minutes: 1,
+      approval_mode: "waiting_review",
+      variation_mode: "sazonal",
+      status: "draft"
+    };
+    const timezoneSchedule = planner.buildSchedule(timezonePlan, 3, new Date("2026-09-03T01:56:00.000Z"));
+    assert(timezoneSchedule.length === 3, "O planejamento deveria manter vagas no dia 02/09 no fuso de São Paulo.");
+    assert(zoned.zonedDateKey(timezoneSchedule[0], "America/Sao_Paulo") === "2026-09-02", "A data agendada não respeitou o fuso do planejador.");
+
+    const normalized = {
+      color_palette: "#5A0000, #6C464A, #FFFCF6",
+      extracted_palette: "",
+      forbidden_colors: "#000000",
+      preferred_typography: ""
+    } as NormalizedBriefing;
+    const constrainedBrief = campaigns.enforceBrandConstraints({
+      visualDirection: { colorPalette: ["preto", "dourado"] }
+    } as unknown as CreativeBrief, normalized);
+    assert(constrainedBrief.visualDirection.colorPalette[0] === "#5A0000", "A paleta atual do cliente não prevaleceu no briefing criativo.");
+    const imagePrompt = campaigns.buildImageGenerationPrompt({
+      imagePrompt: "Criativo de teste.",
+      negativePrompt: "texto ilegível"
+    } as unknown as CreativeOutput, normalized);
+    assert(imagePrompt.includes("#5A0000") && imagePrompt.includes("#FFFCF6"), "O prompt final da imagem não recebeu a paleta do cliente.");
 
     const clientInsert = await db.run("INSERT INTO clients (name, segment) VALUES (?, ?)", ["Cliente Smoke", "Testes"]);
     const clientId = Number(clientInsert.lastInsertRowid);
@@ -68,8 +112,8 @@ async function main() {
       theme: "Tema inicial",
       strategic_description: "Validação isolada",
       objective: "Validar edição",
-      start_date: tomorrow.toISOString().slice(0, 10),
-      end_date: end.toISOString().slice(0, 10),
+      start_date: zoned.zonedDateKey(tomorrow, "America/Sao_Paulo"),
+      end_date: zoned.zonedDateKey(end, "America/Sao_Paulo"),
       recurrence_type: "daily" as const,
       recurrence_days: [],
       preferred_time: "09:00",
@@ -118,7 +162,7 @@ async function main() {
       `A navegação entre criativos não encontrou o item seguinte da lista: ${JSON.stringify({ firstCampaign, secondCampaign, navigation })}`
     );
 
-    console.log(JSON.stringify({ status: "ok", checks: ["custos", "planejador", "duplicação", "avaliações", "aprendizado", "navegação"] }));
+    console.log(JSON.stringify({ status: "ok", checks: ["fuso", "paleta", "custos", "planejador", "duplicação", "avaliações", "aprendizado", "navegação"] }));
   } finally {
     if (applicationPool) await applicationPool.end();
     await adminPool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);

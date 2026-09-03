@@ -3,6 +3,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { PageHeader } from "../components/PageHeader";
+import { appendDictation, VoiceDictationButton } from "../components/VoiceDictationButton";
 import { createCampaign, getClient, getClients } from "../services/api";
 import type { ClientProfile, ClientSummary } from "../types";
 
@@ -98,9 +99,9 @@ export function NewCampaign() {
             <div className="md:col-span-2">
               <TextArea label="Briefing livre" name="free_briefing" value={form.free_briefing} onChange={update} required />
             </div>
-            <Field label="Objetivo da campanha" name="objetivo" value={form.objetivo} onChange={update} />
-            <Field label="Oferta" name="oferta" value={form.oferta} onChange={update} />
-            <Field label="Público-alvo" name="publico_alvo" value={form.publico_alvo} onChange={update} />
+            <Field label="Objetivo da campanha" name="objetivo" value={form.objetivo} onChange={update} dictation />
+            <Field label="Oferta" name="oferta" value={form.oferta} onChange={update} dictation />
+            <Field label="Público-alvo" name="publico_alvo" value={form.publico_alvo} onChange={update} dictation />
             <Field label="Tom da marca" name="tom_marca" value={form.tom_marca} onChange={update} />
             <div>
               <label className="label">Formato</label>
@@ -187,13 +188,16 @@ function Memory({ label, value }: { label: string; value: string | null }) {
   );
 }
 
-function Field(props: { label: string; name: string; value: string; onChange: (name: string, value: string) => void }) {
+function Field(props: { label: string; name: string; value: string; dictation?: boolean; onChange: (name: string, value: string) => void }) {
   return (
     <div>
       <label className="label" htmlFor={props.name}>
         {props.label}
       </label>
-      <input className="field" id={props.name} name={props.name} value={props.value} onChange={(event) => props.onChange(props.name, event.target.value)} />
+      <div className="flex items-start gap-2">
+        <input className="field" id={props.name} name={props.name} value={props.value} onChange={(event) => props.onChange(props.name, event.target.value)} />
+        {props.dictation && <VoiceDictationButton onTranscript={(text) => props.onChange(props.name, appendDictation(props.value, text))} />}
+      </div>
     </div>
   );
 }
@@ -204,14 +208,17 @@ function TextArea(props: { label: string; name: string; value: string; required?
       <label className="label" htmlFor={props.name}>
         {props.label}
       </label>
-      <textarea
-        className="field min-h-28 resize-y"
-        id={props.name}
-        name={props.name}
-        required={props.required}
-        value={props.value}
-        onChange={(event) => props.onChange(props.name, event.target.value)}
-      />
+      <div className="flex items-start gap-2">
+        <textarea
+          className="field min-h-28 resize-y"
+          id={props.name}
+          name={props.name}
+          required={props.required}
+          value={props.value}
+          onChange={(event) => props.onChange(props.name, event.target.value)}
+        />
+        <VoiceDictationButton onTranscript={(text) => props.onChange(props.name, appendDictation(props.value, text))} />
+      </div>
     </div>
   );
 }

@@ -30,6 +30,7 @@ export const config = {
   textModel: process.env.OPENAI_TEXT_MODEL ?? "gpt-5.4-mini",
   imageModel: process.env.OPENAI_IMAGE_MODEL ?? "gpt-image-2",
   openaiTimeoutMs: Number(process.env.OPENAI_TIMEOUT_MS ?? 120000),
+  plannerTimeZone: process.env.PLANNER_TIME_ZONE?.trim() || "America/Sao_Paulo",
   jwtSecret: process.env.JWT_SECRET?.trim() ?? "",
   jwtExpiresInSeconds: Number(process.env.JWT_EXPIRES_IN_SECONDS ?? 28800)
 };

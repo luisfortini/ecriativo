@@ -1,6 +1,8 @@
 import type { PoolClient } from "pg";
+import { config } from "../config.js";
 import { all, get, run, transaction } from "../db/connection.js";
 import { AppError } from "../utils/errors.js";
+import { calendarDayDifference, zonedDateKey, zonedDateTime, zonedHourKey, zonedWeekday } from "../utils/zonedDateTime.js";
 import type { CampaignFormat } from "../types.js";
 import { createCampaign, setCampaignCreativeStatus } from "./campaignService.js";
 import { getClient } from "./clientService.js";
@@ -436,11 +438,12 @@ async function createQueueForPlan(plan: PlannerPlan, selectedClients?: Array<{ c
   }
 }
 
-function buildSchedule(plan: PlannerPlan, total: number) {
-  const start = combineDateAndTime(plan.start_date, plan.preferred_time);
-  const end = new Date(`${plan.end_date}T23:59:59`);
+export function buildSchedule(plan: PlannerPlan, total: number, now = new Date()) {
+  const timeZone = config.plannerTimeZone;
+  const start = zonedDateTime(plan.start_date, plan.preferred_time || "09:00", timeZone);
+  const end = zonedDateTime(plan.end_date, "23:59:59", timeZone);
   const dates: Date[] = [];
-  let cursor = new Date(Math.max(start.getTime(), Date.now()));
+  let cursor = new Date(Math.max(start.getTime(), now.getTime()));
   const minInterval = Math.max(1, plan.min_interval_minutes || 5);
   const maxDay = Math.max(1, plan.max_ads_per_day || 5);
   const maxHour = Math.max(1, plan.max_ads_per_hour || 1);
@@ -449,9 +452,9 @@ function buildSchedule(plan: PlannerPlan, total: number) {
   const hourCount = new Map<string, number>();
 
   while (dates.length < total && cursor <= end) {
-    if (isAllowedByRecurrence(cursor, plan, allowedDays)) {
-      const dayKey = cursor.toISOString().slice(0, 10);
-      const hourKey = cursor.toISOString().slice(0, 13);
+    if (isAllowedByRecurrence(cursor, plan, allowedDays, timeZone)) {
+      const dayKey = zonedDateKey(cursor, timeZone);
+      const hourKey = zonedHourKey(cursor, timeZone);
       if ((dayCount.get(dayKey) ?? 0) < maxDay && (hourCount.get(hourKey) ?? 0) < maxHour) {
         dates.push(new Date(cursor));
         dayCount.set(dayKey, (dayCount.get(dayKey) ?? 0) + 1);
@@ -463,14 +466,15 @@ function buildSchedule(plan: PlannerPlan, total: number) {
   return dates;
 }
 
-function isAllowedByRecurrence(date: Date, plan: PlannerPlan, allowedDays: number[]) {
-  if (allowedDays.length && !allowedDays.includes(date.getDay())) return false;
-  if (plan.recurrence_type === "once") return date.toISOString().slice(0, 10) === plan.start_date;
+function isAllowedByRecurrence(date: Date, plan: PlannerPlan, allowedDays: number[], timeZone: string) {
+  const dateKey = zonedDateKey(date, timeZone);
+  if (allowedDays.length && !allowedDays.includes(zonedWeekday(date, timeZone))) return false;
+  if (plan.recurrence_type === "once") return dateKey === plan.start_date;
   if (plan.recurrence_type === "daily") return true;
-  const diffDays = Math.floor((date.getTime() - new Date(`${plan.start_date}T00:00:00`).getTime()) / 86400000);
+  const diffDays = calendarDayDifference(dateKey, plan.start_date);
   if (plan.recurrence_type === "weekly") return diffDays % 7 === 0 || allowedDays.length > 0;
   if (plan.recurrence_type === "biweekly") return diffDays % 14 === 0 || allowedDays.length > 0;
-  if (plan.recurrence_type === "monthly") return date.getDate() === new Date(`${plan.start_date}T00:00:00`).getDate();
+  if (plan.recurrence_type === "monthly") return Number(dateKey.slice(-2)) === Number(plan.start_date.slice(-2));
   return true;
 }
 
@@ -515,11 +519,7 @@ function safeArray(value: string | null) {
   }
 }
 
-function combineDateAndTime(date: string, time?: string | null) {
-  return new Date(`${date}T${time || "09:00"}:00`);
-}
-
-interface PlannerPlan {
+export interface PlannerPlan {
   id: number;
   name: string;
   theme: string;

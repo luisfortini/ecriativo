@@ -529,6 +529,7 @@ Projeção reduzida da campanha:
 - oferta;
 - formato;
 - público atual;
+- paleta e demais restrições visuais atuais;
 - restrições;
 - observações;
 - referências aprovadas resumidas;
@@ -548,6 +549,13 @@ O diagnóstico define padrões da marca, mas não deve substituir:
 - restrição específica;
 - observação específica;
 - público sobrescrito na campanha.
+
+A paleta normalizada da campanha também prevalece sobre um Profile Diagnostic
+antigo ou incompleto. Antes de persistir o Creative Brief, o backend aplica essa
+paleta em `visualDirection.colorPalette`. O Agente Criativo recebe novamente as
+restrições atuais e o prompt enviado ao gerador de imagem contém uma instrução
+determinística com as cores cadastradas. Assim, a identidade cromática não
+depende apenas da interpretação dos agentes.
 
 ### Saída
 
@@ -690,6 +698,11 @@ Recebe o conteúdo preparado pelo Creative Output e instruções fixas adicionai
 ### Campaign Planner
 
 Organiza agenda, fila, variações e limites de geração. Não é um agente editorial e não produz estratégia por conta própria.
+
+O calendário é interpretado no fuso configurado em `PLANNER_TIME_ZONE`, incluindo
+comparação de datas, dias da semana e limites por dia/hora. A interface oferece
+ditado em português nos campos descritivos por meio da API de reconhecimento de
+voz do navegador quando disponível.
 
 ---
 

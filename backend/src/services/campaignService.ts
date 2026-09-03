@@ -65,7 +65,7 @@ export async function createCampaign(
         }
       )
     );
-    const creativeBrief = strategistRun.parsed;
+    const creativeBrief = enforceBrandConstraints(strategistRun.parsed, normalized);
     await saveCampaignArtifact(
       pipelineRunId,
       { artifactType: CAMPAIGN_ARTIFACT_TYPES.creativeBrief, payload: creativeBrief },
@@ -79,7 +79,7 @@ export async function createCampaign(
     const creativeRun = await runCampaignPipelineStep(pipelineRunId, "creative_output", () =>
       executeAgentByKey<CreativeOutput>(
         "creative_agent",
-        buildCreativeAgentContext(profileDiagnostic, creativeBrief, normalized.format),
+        buildCreativeAgentContext(profileDiagnostic, creativeBrief, normalized),
         {
           campaignId,
           clientId: input.client_id,
@@ -104,7 +104,7 @@ export async function createCampaign(
 
     const image = await runCampaignPipelineStep(pipelineRunId, "image_generation", () =>
       generateImage(
-        `${creativeOutput.imagePrompt}\nEvitar: ${creativeOutput.negativePrompt}\nNao desenhe, recrie ou incorpore logotipos. Reserve a area sugerida para aplicacao posterior da logo original.`,
+        buildImageGenerationPrompt(creativeOutput, normalized),
         input.formato,
         {
           clientId: input.client_id,
@@ -222,6 +222,7 @@ function buildStrategistAgentContext(
       targetAudienceOverride: truncate(normalized.target_audience, 500),
       restrictions: truncate(normalized.restrictions, 700),
       observations: truncate(normalized.observations, 700),
+      brandConstraints: brandConstraints(normalized),
       approvedReferences: normalized.client_prompt_context.referencias_aprovadas_resumidas,
       rejectedReferences: normalized.client_prompt_context.referencias_reprovadas_resumidas,
       campaignReferenceFile: referenceFilePath ?? null
@@ -232,13 +233,60 @@ function buildStrategistAgentContext(
 function buildCreativeAgentContext(
   profileDiagnostic: ProfileDiagnosticRecord,
   creativeBrief: CreativeBrief,
-  format: string
+  normalized: NormalizedBriefing
 ) {
   return {
     profile_diagnostic: profileDiagnostic.payload,
     creative_brief: creativeBrief,
-    output_format: format
+    brand_constraints: brandConstraints(normalized),
+    output_format: normalized.format
   };
+}
+
+export function enforceBrandConstraints(creativeBrief: CreativeBrief, normalized: NormalizedBriefing) {
+  const palette = splitPalette(normalized.color_palette || normalized.extracted_palette);
+  if (!palette.length) return creativeBrief;
+  return {
+    ...creativeBrief,
+    visualDirection: {
+      ...creativeBrief.visualDirection,
+      colorPalette: palette
+    }
+  };
+}
+
+export function buildImageGenerationPrompt(creativeOutput: CreativeOutput, normalized: NormalizedBriefing) {
+  const palette = splitPalette(normalized.color_palette || normalized.extracted_palette);
+  const paletteInstruction = palette.length
+    ? `Paleta obrigatória da marca: ${palette.join(", ")}. Use essas cores como base predominante da composição. Cores complementares podem aparecer apenas quando necessárias e não devem substituir a identidade cadastrada.`
+    : "Use a identidade cromática descrita no briefing criativo.";
+  const forbiddenColors = normalized.forbidden_colors.trim()
+    ? `Não utilizar estas cores: ${normalized.forbidden_colors.trim()}.`
+    : "";
+  return [
+    creativeOutput.imagePrompt,
+    paletteInstruction,
+    forbiddenColors,
+    `Evitar: ${creativeOutput.negativePrompt}`,
+    "Não desenhe, recrie ou incorpore logotipos. Reserve a área sugerida para aplicação posterior da logo original."
+  ].filter(Boolean).join("\n");
+}
+
+function brandConstraints(normalized: NormalizedBriefing) {
+  return {
+    colorPalette: splitPalette(normalized.color_palette || normalized.extracted_palette),
+    forbiddenColors: splitPalette(normalized.forbidden_colors),
+    preferredTypography: normalized.preferred_typography,
+    instruction: "A paleta e as restrições atuais da campanha prevalecem sobre diagnóstico ou memória antigos. Não invente uma paleta substituta."
+  };
+}
+
+function splitPalette(value: string) {
+  return value
+    .split(/[,;\n]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 8);
 }
 
 function truncate(value: string, max: number) {

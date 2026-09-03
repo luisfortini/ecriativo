@@ -25,6 +25,7 @@ services:
       OPENAI_TEXT_MODEL: ${OPENAI_TEXT_MODEL:-gpt-5.5}
       OPENAI_IMAGE_MODEL: ${OPENAI_IMAGE_MODEL:-gpt-image-2}
       OPENAI_TIMEOUT_MS: ${OPENAI_TIMEOUT_MS:-120000}
+      PLANNER_TIME_ZONE: ${PLANNER_TIME_ZONE:-America/Sao_Paulo}
       PORT: 3333
       PUBLIC_BASE_URL: http://localhost:3333
       GENERATED_FILES_DIR: /app/backend/generated

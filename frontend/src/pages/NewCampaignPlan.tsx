@@ -4,6 +4,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { LoadingBlock } from "../components/LoadingBlock";
 import { PageHeader } from "../components/PageHeader";
+import { appendDictation, VoiceDictationButton } from "../components/VoiceDictationButton";
 import { getCampaignPlan, getClients, saveCampaignPlan } from "../services/api";
 import type { CampaignPlan, ClientSummary } from "../types";
 import { optionLabel } from "../utils/uiLabels";
@@ -13,8 +14,8 @@ const initial = {
   theme: "",
   strategic_description: "",
   objective: "",
-  start_date: new Date().toISOString().slice(0, 10),
-  end_date: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
+  start_date: localDateValue(new Date()),
+  end_date: localDateValue(new Date(Date.now() + 30 * 86400000)),
   recurrence_type: "once",
   preferred_time: "09:00",
   ads_per_client: "1",
@@ -123,8 +124,8 @@ export function NewCampaignPlan() {
         <section className="panel p-5">
           <div className="grid gap-4 md:grid-cols-2">
             <Field label="Nome" value={form.name} onChange={(v) => setForm({ ...form, name: v })} required />
-            <Field label="Tema da campanha" value={form.theme} onChange={(v) => setForm({ ...form, theme: v })} required />
-            <Field label="Objetivo" value={form.objective} onChange={(v) => setForm({ ...form, objective: v })} required />
+            <Field label="Tema da campanha" value={form.theme} onChange={(v) => setForm({ ...form, theme: v })} required dictation />
+            <Field label="Objetivo" value={form.objective} onChange={(v) => setForm({ ...form, objective: v })} required dictation />
             <Select label="Formato" value={form.ad_format} onChange={(v) => setForm({ ...form, ad_format: v })} options={["1:1", "4:5", "9:16", "16:9"]} />
             <Field label="Início" type="date" value={form.start_date} onChange={(v) => setForm({ ...form, start_date: v })} />
             <Field label="Fim" type="date" value={form.end_date} onChange={(v) => setForm({ ...form, end_date: v })} />
@@ -145,8 +146,7 @@ export function NewCampaignPlan() {
               <Select label="Situação" value={form.status} onChange={(v) => setForm({ ...form, status: v })} options={["draft", "active", "paused"]} />
             )}
           </div>
-          <label className="label mt-4">Descrição estratégica</label>
-          <textarea className="field min-h-28" value={form.strategic_description} onChange={(e) => setForm({ ...form, strategic_description: e.target.value })} />
+          <TextArea label="Descrição estratégica" value={form.strategic_description} onChange={(value) => setForm({ ...form, strategic_description: value })} dictation />
           <div className="mt-4">
             <label className="label">Dias da semana permitidos</label>
             <div className="flex flex-wrap gap-2">
@@ -177,10 +177,21 @@ export function NewCampaignPlan() {
   );
 }
 
-function Field({ label, value, onChange, type = "text", required }: { label: string; value: string; type?: string; required?: boolean; onChange: (value: string) => void }) {
-  return <div><label className="label">{label}</label><input className="field" required={required} type={type} value={value} onChange={(e) => onChange(e.target.value)} /></div>;
+function Field({ label, value, onChange, type = "text", required, dictation = false }: { label: string; value: string; type?: string; required?: boolean; dictation?: boolean; onChange: (value: string) => void }) {
+  return <div><label className="label">{label}</label><div className="flex items-start gap-2"><input className="field" required={required} type={type} value={value} onChange={(e) => onChange(e.target.value)} />{dictation && <VoiceDictationButton onTranscript={(text) => onChange(appendDictation(value, text))} />}</div></div>;
+}
+
+function TextArea({ label, value, onChange, dictation = false }: { label: string; value: string; dictation?: boolean; onChange: (value: string) => void }) {
+  return <div className="mt-4"><label className="label">{label}</label><div className="flex items-start gap-2"><textarea className="field min-h-28 resize-y" value={value} onChange={(event) => onChange(event.target.value)} />{dictation && <VoiceDictationButton onTranscript={(text) => onChange(appendDictation(value, text))} />}</div></div>;
 }
 
 function Select({ label, value, onChange, options }: { label: string; value: string; options: string[]; onChange: (value: string) => void }) {
   return <div><label className="label">{label}</label><select className="field" value={value} onChange={(e) => onChange(e.target.value)}>{options.map((option) => <option key={option} value={option}>{optionLabel(option)}</option>)}</select></div>;
+}
+
+function localDateValue(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }

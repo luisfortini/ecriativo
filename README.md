@@ -156,6 +156,8 @@ A tela `Planejador` permite criar campanhas em massa por tema, periodo, clientes
 - A ativacao cria itens em `campaign_generation_queue`.
 - O backend processa a fila com `node-cron` a cada minuto.
 - O worker respeita concorrencia global, intervalo minimo, limites por dia/hora e tentativas com backoff.
+- Datas, dias da semana e limites diários são calculados no fuso definido por `PLANNER_TIME_ZONE`.
+- Tema, objetivo e descrição estratégica aceitam digitação por voz em navegadores compatíveis, mediante permissão de microfone.
 - Para producao, a fila pode ser migrada para BullMQ + Redis.
 
 ## Variáveis
@@ -168,4 +170,5 @@ A tela `Planejador` permite criar campanhas em massa por tema, periodo, clientes
 - `PUBLIC_BASE_URL`: URL pública do backend para arquivos gerados.
 - `GENERATED_FILES_DIR`: diretório persistente das imagens geradas.
 - `UPLOAD_FILES_DIR`: diretório persistente dos arquivos enviados.
+- `PLANNER_TIME_ZONE`: fuso usado pelo agendamento; padrão `America/Sao_Paulo`.
 - `FRONTEND_ORIGIN`: origem permitida no CORS.
