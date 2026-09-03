@@ -574,6 +574,36 @@ const migrations: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_users_role
         ON users(role);
     `
+  },
+  {
+    id: "009_campaign_reviews",
+    up: `
+      CREATE TABLE IF NOT EXISTS campaign_reviews (
+        id BIGSERIAL PRIMARY KEY,
+        campaign_id BIGINT NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+        client_id BIGINT REFERENCES clients(id) ON DELETE CASCADE,
+        user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+        decision TEXT NOT NULL CHECK (decision IN ('approved', 'rejected')),
+        reason TEXT,
+        tags_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CHECK (decision != 'rejected' OR length(trim(COALESCE(reason, ''))) > 0)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_campaign_reviews_campaign_id
+        ON campaign_reviews(campaign_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_campaign_reviews_client_id
+        ON campaign_reviews(client_id, created_at DESC);
+
+      UPDATE campaigns
+      SET creative_status = status,
+          status = 'completed',
+          updated_at = CURRENT_TIMESTAMP
+      WHERE status IN ('approved', 'rejected');
+
+      ALTER TABLE campaigns
+        ALTER COLUMN creative_status SET DEFAULT 'waiting_review';
+    `
   }
 ];
 

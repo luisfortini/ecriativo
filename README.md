@@ -74,6 +74,11 @@ docker compose up --build
 
 O servico `postgres` usa imagem `postgres:16`, volume persistente e healthcheck.
 
+Os diretórios de imagens geradas e uploads também precisam de armazenamento
+persistente em produção. Configure `GENERATED_FILES_DIR` e `UPLOAD_FILES_DIR`
+para caminhos montados em volume; o `docker-compose.yml` já inclui esses dois
+volumes.
+
 ## Migracao de SQLite para PostgreSQL
 
 1. Configure `DATABASE_URL` apontando para o PostgreSQL.
@@ -161,4 +166,6 @@ A tela `Planejador` permite criar campanhas em massa por tema, periodo, clientes
 - `DATABASE_URL`: conexao PostgreSQL.
 - `SQLITE_DATABASE_PATH`: caminho opcional do SQLite apenas para `npm run migrate-sqlite-to-postgres`.
 - `PUBLIC_BASE_URL`: URL pública do backend para arquivos gerados.
+- `GENERATED_FILES_DIR`: diretório persistente das imagens geradas.
+- `UPLOAD_FILES_DIR`: diretório persistente dos arquivos enviados.
 - `FRONTEND_ORIGIN`: origem permitida no CORS.

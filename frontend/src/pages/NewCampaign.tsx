@@ -67,7 +67,7 @@ export function NewCampaign() {
       const campaign = await createCampaign(data);
       navigate(`/campanhas/${campaign.id}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Nao foi possivel criar a campanha.");
+      setError(err instanceof Error ? err.message : "Não foi possível criar a campanha.");
     } finally {
       setLoading(false);
     }
@@ -77,7 +77,7 @@ export function NewCampaign() {
     <>
       <PageHeader
         title="Nova Campanha"
-        description="Selecione um cliente, escreva o briefing livre e sobrescreva apenas os campos que devem ter prioridade sobre a memoria."
+        description="Selecione um cliente, escreva o briefing livre e sobrescreva apenas os campos que devem ter prioridade sobre a memória."
       />
       {error && <ErrorBanner message={error} />}
 
@@ -100,7 +100,7 @@ export function NewCampaign() {
             </div>
             <Field label="Objetivo da campanha" name="objetivo" value={form.objetivo} onChange={update} />
             <Field label="Oferta" name="oferta" value={form.oferta} onChange={update} />
-            <Field label="Publico-alvo" name="publico_alvo" value={form.publico_alvo} onChange={update} />
+            <Field label="Público-alvo" name="publico_alvo" value={form.publico_alvo} onChange={update} />
             <Field label="Tom da marca" name="tom_marca" value={form.tom_marca} onChange={update} />
             <div>
               <label className="label">Formato</label>
@@ -123,25 +123,25 @@ export function NewCampaign() {
           </div>
 
           <div className="mt-4 grid gap-4">
-            <TextArea label="Referencias visuais desta campanha" name="referencias_visuais" value={form.referencias_visuais} onChange={update} />
-            <TextArea label="Restricoes desta campanha" name="restricoes" value={form.restricoes} onChange={update} />
-            <TextArea label="Observacoes" name="observacoes" value={form.observacoes} onChange={update} />
+            <TextArea label="Referências visuais desta campanha" name="referencias_visuais" value={form.referencias_visuais} onChange={update} />
+            <TextArea label="Restrições desta campanha" name="restricoes" value={form.restricoes} onChange={update} />
+            <TextArea label="Observações" name="observacoes" value={form.observacoes} onChange={update} />
           </div>
         </section>
 
         <aside className="space-y-4">
           <div className="panel p-5">
-            <h2 className="mb-3 font-bold text-ink">Memoria carregada</h2>
+            <h2 className="mb-3 font-bold text-ink">Memória carregada</h2>
             {memory ? (
               <div className="space-y-3 text-sm text-slate-700">
                 <Memory label="Segmento" value={memory.segment} />
-                <Memory label="Publico" value={memory.target_audience} />
+                <Memory label="Público" value={memory.target_audience} />
                 <Memory label="Tom" value={memory.brand_voice} />
                 <Memory label="Paleta" value={memory.color_palette} />
                 <Memory label="Estilos aprovados" value={memory.approved_styles} />
                 <Memory label="Estilos proibidos" value={memory.forbidden_styles} />
                 <Memory
-                  label="Diagnostico de perfil"
+                  label="Diagnóstico de perfil"
                   value={
                     memory.profile_diagnostics?.find((item) => item.status === "active")
                       ? `v${memory.profile_diagnostics.find((item) => item.status === "active")?.version} · contrato ${memory.profile_diagnostics.find((item) => item.status === "active")?.schema_version}`
@@ -151,12 +151,12 @@ export function NewCampaign() {
                 <p className="text-xs text-slate-500">{memory.assets.length} assets disponiveis para os agentes.</p>
               </div>
             ) : (
-              <p className="text-sm text-slate-500">Selecione um cliente para carregar padroes de marca.</p>
+              <p className="text-sm text-slate-500">Selecione um cliente para carregar padrões de marca.</p>
             )}
           </div>
 
           <div className="panel p-5">
-            <label className="label">Referencia adicional da campanha</label>
+            <label className="label">Referência adicional da campanha</label>
             <label className="flex cursor-pointer flex-col items-center justify-center gap-3 rounded-md border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center text-sm text-slate-600 hover:border-brand">
               <ImageUp size={26} className="text-brand" />
               <span>{file ? file.name : "Enviar arquivo opcional"}</span>
@@ -182,7 +182,7 @@ function Memory({ label, value }: { label: string; value: string | null }) {
   return (
     <div>
       <p className="text-xs font-semibold uppercase text-slate-500">{label}</p>
-      <p>{value || "Nao informado"}</p>
+      <p>{value || "Não informado"}</p>
     </div>
   );
 }

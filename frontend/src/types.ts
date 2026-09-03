@@ -115,6 +115,7 @@ export interface CampaignSummary {
   objetivo: string | null;
   formato: CampaignFormat | null;
   image_url: string | null;
+  generated_image_url?: string | null;
   status: string;
   created_at: string;
 }
@@ -159,6 +160,7 @@ export interface NormalizedBriefing {
 }
 
 export interface CampaignDetail extends CampaignSummary {
+  creative_status: "draft" | "waiting_review" | "approved" | "rejected";
   error_message: string | null;
   free_briefing: string | null;
   publico_alvo: string | null;
@@ -174,6 +176,19 @@ export interface CampaignDetail extends CampaignSummary {
   pipeline_run: CampaignPipelineRun | null;
   generated_image_url?: string | null;
   final_image_url?: string | null;
+  reviews: CampaignReview[];
+}
+
+export interface CampaignReview {
+  id: number;
+  campaign_id: number;
+  client_id: number | null;
+  user_id: number | null;
+  reviewer_name: string | null;
+  decision: "approved" | "rejected";
+  reason: string | null;
+  tags_json: string[];
+  created_at: string;
 }
 
 export interface AuthUser {
@@ -276,6 +291,7 @@ export interface CreativeHistoryItem {
   cliente: string;
   formato: CampaignFormat;
   image_url: string | null;
+  generated_image_url?: string | null;
   creative: Creative;
   strategy: Strategy;
   created_at: string;
@@ -416,7 +432,37 @@ export interface AiCostDashboard {
   rankings: Record<string, Array<Record<string, any>>>;
   insights: string[];
   alerts: string[];
+  pricing_health: AiPricingHealth[];
   logs: Array<Record<string, any>>;
+}
+
+export interface CreativeNavigation {
+  previous_id: number | null;
+  next_id: number | null;
+}
+
+export interface AiPricingHealth {
+  model: string;
+  usage_count: number;
+  input_tokens: number;
+  output_tokens: number;
+  image_count: number;
+  price_id: number | null;
+  active: boolean | null;
+  input_price_per_1m_tokens: number | null;
+  output_price_per_1m_tokens: number | null;
+  image_price: number | null;
+  status: "configured" | "missing" | "inactive" | "zero_price";
+}
+
+export interface AiCostRecalculation {
+  applied: boolean;
+  total_records: number;
+  recalculable_records: number;
+  unavailable_records: number;
+  previous_total_cost: number;
+  recalculated_total_cost: number;
+  unavailable_models: Array<{ model: string; records: number }>;
 }
 
 export interface AiModelPrice {
@@ -426,7 +472,7 @@ export interface AiModelPrice {
   output_price_per_1m_tokens: number;
   image_price: number;
   currency: string;
-  active: number;
+  active: boolean;
   created_at: string;
   updated_at: string;
 }

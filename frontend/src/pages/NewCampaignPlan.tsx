@@ -1,10 +1,12 @@
 import { Save } from "lucide-react";
 import { FormEvent, useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { ErrorBanner } from "../components/ErrorBanner";
+import { LoadingBlock } from "../components/LoadingBlock";
 import { PageHeader } from "../components/PageHeader";
-import { getClients, saveCampaignPlan } from "../services/api";
-import type { ClientSummary } from "../types";
+import { getCampaignPlan, getClients, saveCampaignPlan } from "../services/api";
+import type { CampaignPlan, ClientSummary } from "../types";
+import { optionLabel } from "../utils/uiLabels";
 
 const initial = {
   name: "",
@@ -36,17 +38,54 @@ const days = [
 ];
 
 export function NewCampaignPlan() {
+  const { id } = useParams();
+  const editing = Boolean(id);
   const [form, setForm] = useState(initial);
   const [clients, setClients] = useState<ClientSummary[]>([]);
   const [selected, setSelected] = useState<Record<number, boolean>>({});
   const [recurrenceDays, setRecurrenceDays] = useState<number[]>([]);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(editing);
   const navigate = useNavigate();
 
   useEffect(() => {
-    getClients().then(setClients).catch((err: Error) => setError(err.message));
-  }, []);
+    Promise.all([getClients(), id ? getCampaignPlan(id) : Promise.resolve(null)])
+      .then(([clientItems, plan]) => {
+        setClients(clientItems);
+        if (plan) fillPlanForm(plan);
+      })
+      .catch((err: Error) => setError(err.message))
+      .finally(() => setLoading(false));
+  }, [id]);
+
+  function fillPlanForm(plan: CampaignPlan) {
+    setForm({
+      name: plan.name,
+      theme: plan.theme,
+      strategic_description: plan.strategic_description || "",
+      objective: plan.objective,
+      start_date: plan.start_date,
+      end_date: plan.end_date,
+      recurrence_type: plan.recurrence_type,
+      preferred_time: plan.preferred_time || "09:00",
+      ads_per_client: String(plan.ads_per_client),
+      ad_format: plan.ad_format,
+      max_ads_per_day: String(plan.max_ads_per_day),
+      max_ads_per_hour: String(plan.max_ads_per_hour),
+      min_interval_minutes: String(plan.min_interval_minutes),
+      approval_mode: plan.approval_mode,
+      variation_mode: plan.variation_mode,
+      status: plan.status
+    });
+    setSelected(Object.fromEntries((plan.clients || []).map((client) => [client.client_id, true])));
+    try {
+      const parsed = JSON.parse(plan.recurrence_days_json || "[]");
+      setRecurrenceDays(Array.isArray(parsed) ? parsed.map(Number) : []);
+    } catch {
+      setRecurrenceDays([]);
+    }
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -62,18 +101,23 @@ export function NewCampaignPlan() {
         recurrence_days: recurrenceDays,
         clients: Object.entries(selected).filter(([, value]) => value).map(([client_id]) => ({ client_id: Number(client_id), ads_quantity: Number(form.ads_per_client) }))
       };
-      const plan = await saveCampaignPlan(null, payload);
+      const plan = await saveCampaignPlan(id ? Number(id) : null, payload);
       navigate(`/planejador/${plan.id}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Nao foi possivel salvar o planejamento.");
+      setError(err instanceof Error ? err.message : "Não foi possível salvar o planejamento.");
     } finally {
       setSaving(false);
     }
   }
 
+  if (loading) return <LoadingBlock label="Carregando planejamento..." />;
+
   return (
     <>
-      <PageHeader title="Novo Planejamento" description="Defina tema, periodo, clientes e limites para criar a fila de geracao controlada." />
+      <PageHeader
+        title={editing ? "Editar planejamento" : "Novo planejamento"}
+        description={editing ? "Altere a configuração; os itens futuros da fila serão recalculados." : "Defina tema, período, clientes e limites para criar a fila de geração controlada."}
+      />
       {error && <ErrorBanner message={error} />}
       <form className="grid gap-6 xl:grid-cols-[1fr_380px]" onSubmit={submit}>
         <section className="panel p-5">
@@ -82,19 +126,26 @@ export function NewCampaignPlan() {
             <Field label="Tema da campanha" value={form.theme} onChange={(v) => setForm({ ...form, theme: v })} required />
             <Field label="Objetivo" value={form.objective} onChange={(v) => setForm({ ...form, objective: v })} required />
             <Select label="Formato" value={form.ad_format} onChange={(v) => setForm({ ...form, ad_format: v })} options={["1:1", "4:5", "9:16", "16:9"]} />
-            <Field label="Inicio" type="date" value={form.start_date} onChange={(v) => setForm({ ...form, start_date: v })} />
+            <Field label="Início" type="date" value={form.start_date} onChange={(v) => setForm({ ...form, start_date: v })} />
             <Field label="Fim" type="date" value={form.end_date} onChange={(v) => setForm({ ...form, end_date: v })} />
-            <Select label="Recorrencia" value={form.recurrence_type} onChange={(v) => setForm({ ...form, recurrence_type: v })} options={["once", "daily", "weekly", "biweekly", "monthly"]} />
-            <Field label="Horario preferencial" type="time" value={form.preferred_time} onChange={(v) => setForm({ ...form, preferred_time: v })} />
-            <Field label="Anuncios por cliente" type="number" value={form.ads_per_client} onChange={(v) => setForm({ ...form, ads_per_client: v })} />
-            <Field label="Max anuncios por dia" type="number" value={form.max_ads_per_day} onChange={(v) => setForm({ ...form, max_ads_per_day: v })} />
-            <Field label="Max anuncios por hora" type="number" value={form.max_ads_per_hour} onChange={(v) => setForm({ ...form, max_ads_per_hour: v })} />
-            <Field label="Intervalo minimo em minutos" type="number" value={form.min_interval_minutes} onChange={(v) => setForm({ ...form, min_interval_minutes: v })} />
-            <Select label="Modo de aprovacao" value={form.approval_mode} onChange={(v) => setForm({ ...form, approval_mode: v })} options={["draft", "waiting_review", "approved"]} />
-            <Select label="Variacao desejada" value={form.variation_mode} onChange={(v) => setForm({ ...form, variation_mode: v })} options={["institucional", "promocional", "emocional", "oportunidade", "autoridade", "educativo", "sazonal"]} />
-            <Select label="Status" value={form.status} onChange={(v) => setForm({ ...form, status: v })} options={["draft", "active", "paused"]} />
+            <Select label="Recorrência" value={form.recurrence_type} onChange={(v) => setForm({ ...form, recurrence_type: v })} options={["once", "daily", "weekly", "biweekly", "monthly"]} />
+            <Field label="Horário preferencial" type="time" value={form.preferred_time} onChange={(v) => setForm({ ...form, preferred_time: v })} />
+            <Field label="Anúncios por cliente" type="number" value={form.ads_per_client} onChange={(v) => setForm({ ...form, ads_per_client: v })} />
+            <Field label="Máximo de anúncios por dia" type="number" value={form.max_ads_per_day} onChange={(v) => setForm({ ...form, max_ads_per_day: v })} />
+            <Field label="Máximo de anúncios por hora" type="number" value={form.max_ads_per_hour} onChange={(v) => setForm({ ...form, max_ads_per_hour: v })} />
+            <Field label="Intervalo mínimo em minutos" type="number" value={form.min_interval_minutes} onChange={(v) => setForm({ ...form, min_interval_minutes: v })} />
+            <Select label="Modo de aprovação" value={form.approval_mode} onChange={(v) => setForm({ ...form, approval_mode: v })} options={["draft", "waiting_review", "approved"]} />
+            <Select label="Variação desejada" value={form.variation_mode} onChange={(v) => setForm({ ...form, variation_mode: v })} options={["institucional", "promocional", "emocional", "oportunidade", "autoridade", "educativo", "sazonal"]} />
+            {editing ? (
+              <div>
+                <p className="label">Situação</p>
+                <p className="field bg-slate-50 text-slate-600">{optionLabel(form.status)}</p>
+              </div>
+            ) : (
+              <Select label="Situação" value={form.status} onChange={(v) => setForm({ ...form, status: v })} options={["draft", "active", "paused"]} />
+            )}
           </div>
-          <label className="label mt-4">Descricao estrategica</label>
+          <label className="label mt-4">Descrição estratégica</label>
           <textarea className="field min-h-28" value={form.strategic_description} onChange={(e) => setForm({ ...form, strategic_description: e.target.value })} />
           <div className="mt-4">
             <label className="label">Dias da semana permitidos</label>
@@ -118,7 +169,7 @@ export function NewCampaignPlan() {
             </div>
           </div>
           <button className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-accent px-4 py-3 text-sm font-bold text-white" disabled={saving}>
-            <Save size={16} />{saving ? "Salvando..." : "Salvar planejamento"}
+            <Save size={16} />{saving ? "Salvando..." : editing ? "Salvar alterações" : "Salvar planejamento"}
           </button>
         </aside>
       </form>
@@ -131,5 +182,5 @@ function Field({ label, value, onChange, type = "text", required }: { label: str
 }
 
 function Select({ label, value, onChange, options }: { label: string; value: string; options: string[]; onChange: (value: string) => void }) {
-  return <div><label className="label">{label}</label><select className="field" value={value} onChange={(e) => onChange(e.target.value)}>{options.map((option) => <option key={option} value={option}>{option}</option>)}</select></div>;
+  return <div><label className="label">{label}</label><select className="field" value={value} onChange={(e) => onChange(e.target.value)}>{options.map((option) => <option key={option} value={option}>{optionLabel(option)}</option>)}</select></div>;
 }

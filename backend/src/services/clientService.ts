@@ -146,7 +146,7 @@ export async function addClientAsset(
 async function removeUploadedAssetFile(fileUrl: string) {
   const filename = path.basename(new URL(fileUrl).pathname);
   const decodedFilename = decodeURIComponent(filename);
-  for (const uploadsDir of [path.resolve("uploads"), path.resolve("backend", "uploads")]) {
+  for (const uploadsDir of Array.from(new Set([config.uploadFilesDir, path.resolve("uploads"), path.resolve("backend", "uploads")]))) {
     const target = path.resolve(uploadsDir, decodedFilename);
     if (path.dirname(target) !== uploadsDir) continue;
     try {

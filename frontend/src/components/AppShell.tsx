@@ -10,7 +10,7 @@ const navItems = [
   { to: "/whatsapp", label: "WhatsApp", icon: MessageCircle },
   { to: "/planejador", label: "Planejador", icon: CalendarClock },
   { to: "/nova-campanha", label: "Nova campanha", icon: Plus },
-  { to: "/historico", label: "Historico", icon: Clock3 }
+  { to: "/historico", label: "Histórico", icon: Clock3 }
 ];
 
 export function AppShell() {
@@ -31,7 +31,7 @@ export function AppShell() {
             alt="e-Criativo"
             className="h-12 w-auto max-w-[190px] object-contain"
           />
-          <p className="mt-2 text-xs text-slate-500">Memoria criativa por cliente</p>
+          <p className="mt-2 text-xs text-slate-500">Memória criativa por cliente</p>
         </div>
 
         <nav className="mt-8 flex-1 space-y-1">

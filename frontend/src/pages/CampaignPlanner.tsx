@@ -7,6 +7,7 @@ import { LoadingBlock } from "../components/LoadingBlock";
 import { PageHeader } from "../components/PageHeader";
 import { getCampaignPlans } from "../services/api";
 import type { CampaignPlan } from "../types";
+import { uiLabel } from "../utils/uiLabels";
 
 export function CampaignPlanner() {
   const [plans, setPlans] = useState<CampaignPlan[]>([]);
@@ -21,7 +22,7 @@ export function CampaignPlanner() {
     <>
       <PageHeader
         title="Planejador de Campanhas"
-        description="Agende campanhas em massa para varios clientes com fila controlada no backend."
+        description="Agende campanhas em massa para vários clientes com fila controlada no servidor."
         action={<Link className="inline-flex items-center gap-2 rounded-md bg-brand px-4 py-2 text-sm font-semibold text-white" to="/planejador/novo"><Plus size={16} />Novo planejamento</Link>}
       />
       {error && <ErrorBanner message={error} />}
@@ -37,7 +38,7 @@ export function CampaignPlanner() {
                 </div>
               </div>
               <div className="flex flex-wrap gap-2 text-xs">
-                <span className="rounded bg-slate-100 px-2 py-1">{plan.status}</span>
+                <span className="rounded bg-slate-100 px-2 py-1">{uiLabel(plan.status)}</span>
                 <span className="rounded bg-slate-100 px-2 py-1">{plan.clients_count ?? 0} clientes</span>
                 <span className="rounded bg-slate-100 px-2 py-1">{plan.completed_count ?? 0}/{plan.queue_count ?? 0} gerados</span>
               </div>

@@ -24,7 +24,7 @@ export function Login() {
       const destination = typeof location.state?.from === "string" ? location.state.from : "/";
       navigate(destination, { replace: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Nao foi possivel entrar.");
+      setError(err instanceof Error ? err.message : "Não foi possível entrar.");
     } finally {
       setSubmitting(false);
     }

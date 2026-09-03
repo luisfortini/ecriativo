@@ -5,6 +5,7 @@ import { EmptyState } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { LoadingBlock } from "../components/LoadingBlock";
 import { PageHeader } from "../components/PageHeader";
+import { SafeImage } from "../components/SafeImage";
 import { getCampaigns } from "../services/api";
 import type { CampaignSummary } from "../types";
 
@@ -60,7 +61,7 @@ export function Dashboard() {
               className="grid grid-cols-[96px_1fr_auto] items-center gap-4 border-b border-slate-100 px-4 py-4 last:border-b-0 hover:bg-slate-50"
             >
               <div className="h-16 w-20 overflow-hidden rounded-md bg-slate-200">
-                {campaign.image_url ? <img className="h-full w-full object-cover" src={campaign.image_url} alt="" /> : null}
+                <SafeImage className="h-full w-full object-cover" src={campaign.image_url} fallbackSrc={campaign.generated_image_url} alt={`Criativo de ${campaign.cliente}`} />
               </div>
               <div>
                 <div className="flex flex-wrap items-center gap-2">

@@ -4,6 +4,7 @@ import { EmptyState } from "../components/EmptyState";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { LoadingBlock } from "../components/LoadingBlock";
 import { PageHeader } from "../components/PageHeader";
+import { SafeImage } from "../components/SafeImage";
 import { getCreatives } from "../services/api";
 import type { CreativeHistoryItem } from "../types";
 
@@ -32,7 +33,7 @@ export function CampaignHistory() {
           {items.map((item) => (
             <Link key={item.id} className="panel overflow-hidden hover:border-brand" to={`/campanhas/${item.id}`}>
               <div className="aspect-[4/3] bg-slate-100">
-                {item.image_url ? <img className="h-full w-full object-cover" src={item.image_url} alt="" /> : null}
+                <SafeImage className="h-full w-full object-cover" src={item.image_url} fallbackSrc={item.generated_image_url} alt={`Criativo de ${item.cliente}`} />
               </div>
               <div className="p-4">
                 <div className="mb-2 flex items-center justify-between gap-3">

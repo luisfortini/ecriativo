@@ -15,8 +15,9 @@ import {
   testAgent
 } from "../services/api";
 import type { Agent, AgentExecutionLog, AgentTestResult, ClientSummary } from "../types";
+import { uiLabel } from "../utils/uiLabels";
 
-const tabs = ["Configuracoes", "Prompt do sistema", "Template de entrada", "Schema de saida", "Teste do agente", "Historico de versoes", "Logs"];
+const tabs = ["Configurações", "Prompt do sistema", "Modelo de entrada", "Esquema de saída", "Teste do agente", "Histórico de versões", "Registros"];
 
 const emptyAgent = {
   name: "",
@@ -92,7 +93,7 @@ export function AgentCenter() {
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (selected?.is_active && !window.confirm("Este agente esta ativo. Salvar alteracoes criara uma nova versao e afetara o fluxo principal. Continuar?")) {
+    if (selected?.is_active && !window.confirm("Este agente está ativo. Salvar alterações criará uma nova versão e afetará o fluxo principal. Continuar?")) {
       return;
     }
     setSaving(true);
@@ -100,10 +101,10 @@ export function AgentCenter() {
     setMessage("");
     try {
       const saved = await saveAgent(selected?.id ?? null, form);
-      setMessage("Nova versao salva.");
+      setMessage("Nova versão salva.");
       loadAgents(saved.id);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Nao foi possivel salvar o agente.");
+      setError(err instanceof Error ? err.message : "Não foi possível salvar o agente.");
     } finally {
       setSaving(false);
     }
@@ -133,9 +134,9 @@ export function AgentCenter() {
   }
 
   async function restore(versionId: number) {
-    if (!selected || !window.confirm("Restaurar esta versao criara uma nova versao atual. Continuar?")) return;
+    if (!selected || !window.confirm("Restaurar esta versão criará uma nova versão atual. Continuar?")) return;
     const agent = await restoreAgentVersion(selected.id, versionId);
-    setMessage("Versao restaurada.");
+    setMessage("Versão restaurada.");
     loadAgents(agent.id);
   }
 
@@ -190,7 +191,7 @@ export function AgentCenter() {
                 type="button"
                 onClick={() => {
                   setTab(item);
-                  if (item === "Logs") loadLogs();
+                  if (item === "Registros") loadLogs();
                 }}
               >
                 {item}
@@ -216,23 +217,23 @@ export function AgentCenter() {
                 </button>
                 <button className="inline-flex items-center gap-2 rounded-md bg-accent px-3 py-2 text-sm font-semibold text-white" disabled={saving}>
                   <Save size={15} />
-                  {saving ? "Salvando..." : "Salvar nova versao"}
+                  {saving ? "Salvando..." : "Salvar nova versão"}
                 </button>
               </div>
             </div>
 
-            {tab === "Configuracoes" && <Settings form={form} setForm={setForm} />}
-            {tab === "Prompt do sistema" && <Editor label="system_prompt" value={form.system_prompt} onChange={(value) => setForm((current) => ({ ...current, system_prompt: value }))} />}
-            {tab === "Template de entrada" && <Editor label="prompt_template" value={form.prompt_template} onChange={(value) => setForm((current) => ({ ...current, prompt_template: value }))} />}
-            {tab === "Schema de saida" && (
+            {tab === "Configurações" && <Settings form={form} setForm={setForm} />}
+            {tab === "Prompt do sistema" && <Editor label="Prompt do sistema" value={form.system_prompt} onChange={(value) => setForm((current) => ({ ...current, system_prompt: value }))} />}
+            {tab === "Modelo de entrada" && <Editor label="Modelo de entrada" value={form.prompt_template} onChange={(value) => setForm((current) => ({ ...current, prompt_template: value }))} />}
+            {tab === "Esquema de saída" && (
               <div>
                 {selected?.contract_key && (
                   <div className="mb-4 rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-                    Contrato oficial: <strong>{selected.contract_key}@{selected.contract_version}</strong>. O schema e gerado pelo registry TypeBox e nao pode ser editado aqui.
+                    Contrato oficial: <strong>{selected.contract_key}@{selected.contract_version}</strong>. O esquema é gerado pelo registro TypeBox e não pode ser editado aqui.
                   </div>
                 )}
                 <Editor
-                  label="output_schema_json"
+                  label="Esquema de saída"
                   value={form.output_schema_json}
                   readOnly={Boolean(selected?.contract_key)}
                   onChange={(value) => setForm((current) => ({ ...current, output_schema_json: value }))}
@@ -252,10 +253,10 @@ export function AgentCenter() {
                 onRun={runTest}
               />
             )}
-            {tab === "Historico de versoes" && (
+            {tab === "Histórico de versões" && (
               <VersionPanel selected={selected} compare={compare} onRestore={restore} onCompare={compareVersion} />
             )}
-            {tab === "Logs" && <LogsPanel logs={logs} />}
+            {tab === "Registros" && <LogsPanel logs={logs} />}
           </form>
         </section>
       </div>
@@ -269,15 +270,15 @@ function Settings({ form, setForm }: { form: typeof emptyAgent; setForm: React.D
       <Field label="Nome" value={form.name} onChange={(value) => setForm((current) => ({ ...current, name: value }))} />
       <Field label="Chave interna" value={form.key} onChange={(value) => setForm((current) => ({ ...current, key: value }))} />
       <Field label="Modelo OpenAI" value={form.model} onChange={(value) => setForm((current) => ({ ...current, model: value }))} />
-      <Field label="Ordem de execucao" type="number" value={String(form.execution_order)} onChange={(value) => setForm((current) => ({ ...current, execution_order: Number(value) }))} />
+      <Field label="Ordem de execução" type="number" value={String(form.execution_order)} onChange={(value) => setForm((current) => ({ ...current, execution_order: Number(value) }))} />
       <Field label="Temperatura" type="number" value={String(form.temperature)} onChange={(value) => setForm((current) => ({ ...current, temperature: Number(value) }))} />
-      <Field label="Max tokens" type="number" value={String(form.max_tokens)} onChange={(value) => setForm((current) => ({ ...current, max_tokens: Number(value) }))} />
+      <Field label="Limite de tokens" type="number" value={String(form.max_tokens)} onChange={(value) => setForm((current) => ({ ...current, max_tokens: Number(value) }))} />
       <div className="md:col-span-2">
-        <label className="label">Descricao</label>
+        <label className="label">Descrição</label>
         <textarea className="field min-h-20" value={form.description} onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))} />
       </div>
       <div className="md:col-span-2">
-        <label className="label">Funcao no fluxo</label>
+        <label className="label">Função no fluxo</label>
         <textarea className="field min-h-20" value={form.role} onChange={(event) => setForm((current) => ({ ...current, role: event.target.value }))} />
       </div>
       <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
@@ -285,7 +286,7 @@ function Settings({ form, setForm }: { form: typeof emptyAgent; setForm: React.D
         Ativo
       </label>
       <div>
-        <label className="label">Notas da alteracao</label>
+        <label className="label">Notas da alteração</label>
         <input className="field" value={form.change_notes} onChange={(event) => setForm((current) => ({ ...current, change_notes: event.target.value }))} />
       </div>
     </div>
@@ -381,7 +382,7 @@ function VersionPanel({ selected, compare, onRestore, onCompare }: { selected: A
         <div key={version.id} className="rounded-md border border-slate-200 p-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <p className="font-semibold text-ink">Versao {version.version_number} · {version.name}</p>
+              <p className="font-semibold text-ink">Versão {version.version_number} · {version.name}</p>
               <p className="text-xs text-slate-500">{version.change_notes || "Sem notas"} · {new Date(version.created_at).toLocaleString("pt-BR")}</p>
             </div>
             <div className="flex gap-2">
@@ -391,7 +392,7 @@ function VersionPanel({ selected, compare, onRestore, onCompare }: { selected: A
               </button>
               <button className="inline-flex items-center gap-2 rounded-md bg-brand px-3 py-2 text-xs font-semibold text-white" type="button" onClick={() => onRestore(version.id)}>
                 <RotateCcw size={14} />
-                Restaurar versao
+                Restaurar versão
               </button>
             </div>
           </div>
@@ -410,23 +411,23 @@ function LogsPanel({ logs }: { logs: AgentExecutionLog[] }) {
         return (
         <details key={log.id} className={`rounded-md border p-4 ${excessive ? "border-amber-300 bg-amber-50" : "border-slate-200"}`}>
           <summary className="cursor-pointer text-sm font-semibold text-ink">
-            {log.status} · {log.latency_ms ?? 0}ms · {new Date(log.created_at).toLocaleString("pt-BR")}
+            {uiLabel(log.status)} · {log.latency_ms ?? 0}ms · {new Date(log.created_at).toLocaleString("pt-BR")}
             {excessive && <span className="ml-2 rounded bg-amber-200 px-2 py-1 text-xs text-amber-900">contexto excessivo</span>}
           </summary>
           <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-600">
-            <span>input: {log.tokens_input ?? "-"}</span>
-            <span>output: {log.tokens_output ?? "-"}</span>
+            <span>entrada: {log.tokens_input ?? "-"}</span>
+            <span>saída: {log.tokens_output ?? "-"}</span>
             <span>total: {total || "-"}</span>
-            <span>contexto: {log.context_chars ?? log.tamanho_contexto_caracteres ?? "-"} chars</span>
+            <span>contexto: {log.context_chars ?? log.tamanho_contexto_caracteres ?? "-"} caracteres</span>
             {log.campaign_id && <span>campanha: {log.campaign_id}</span>}
             {log.client_id && <span>cliente: {log.client_id}</span>}
             {log.pipeline_run_id && <span>pipeline: {log.pipeline_run_id}</span>}
             {log.step_key && <span>etapa: {log.step_key}</span>}
-            {log.agent_version_id && <span>versao do agente: {log.agent_version_id}</span>}
+            {log.agent_version_id && <span>versão do agente: {log.agent_version_id}</span>}
           </div>
           <div className="mt-3 grid gap-3 xl:grid-cols-2">
-            <Result title="Input" value={log.input_json} />
-            <Result title="Output" value={log.output_parsed_json || log.output_raw || log.error_message || ""} />
+            <Result title="Entrada" value={log.input_json} />
+            <Result title="Saída" value={log.output_parsed_json || log.output_raw || log.error_message || ""} />
           </div>
         </details>
         );

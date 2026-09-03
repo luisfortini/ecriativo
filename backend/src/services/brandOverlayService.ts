@@ -105,7 +105,7 @@ export async function applyBrandOverlay(input: BrandOverlayInput): Promise<Brand
       resizedLogo.info.height,
       margin
     );
-    const outputDir = path.resolve("generated");
+    const outputDir = config.generatedFilesDir;
     await fs.mkdir(outputDir, { recursive: true });
     const filename = `brand-overlay-${input.campaignId}-${Date.now()}-${Math.random().toString(16).slice(2)}.png`;
     const outputPath = path.join(outputDir, filename);
@@ -173,7 +173,7 @@ async function loadGeneratedImage(imagePath: string | null, imageUrl: string): P
 async function resolveUploadedAssetPath(fileUrl: string) {
   const filename = path.basename(new URL(fileUrl).pathname);
   const decodedFilename = decodeURIComponent(filename);
-  const uploadDirectories = [path.resolve("uploads"), path.resolve("backend", "uploads")];
+  const uploadDirectories = Array.from(new Set([config.uploadFilesDir, path.resolve("uploads"), path.resolve("backend", "uploads")]));
   for (const uploadsDir of uploadDirectories) {
     const assetPath = path.resolve(uploadsDir, decodedFilename);
     if (path.dirname(assetPath) !== uploadsDir) continue;

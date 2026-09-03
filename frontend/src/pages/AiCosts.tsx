@@ -1,4 +1,4 @@
-import { AlertTriangle, BarChart3, Download, Eye, Save } from "lucide-react";
+import { AlertTriangle, BarChart3, Download, Eye, RefreshCcw, Save } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { LoadingBlock } from "../components/LoadingBlock";
@@ -12,19 +12,21 @@ import {
   getCampaignPlans,
   getCampaigns,
   getClients,
+  recalculateAiUsageCosts,
   saveAiCostSettings,
   saveAiModelPrice,
   API_URL
 } from "../services/api";
-import type { Agent, AiCostDashboard, AiModelPrice, CampaignPlan, CampaignSummary, ClientSummary } from "../types";
+import type { Agent, AiCostDashboard, AiModelPrice, AiPricingHealth, CampaignPlan, CampaignSummary, ClientSummary } from "../types";
+import { uiLabel } from "../utils/uiLabels";
 
 const operationOptions = [
   ["", "Todas"],
-  ["normalizacao_briefing", "Normalizacao de briefing"],
+  ["normalizacao_briefing", "Normalização do briefing"],
   ["estrategista", "Estrategista"],
   ["criativo", "Criativo"],
-  ["analise_marca", "Analise de marca"],
-  ["geracao_imagem", "Geracao de imagem"],
+  ["analise_marca", "Análise de marca"],
+  ["geracao_imagem", "Geração de imagem"],
   ["rotina_agendada", "Rotina agendada"],
   ["reprocessamento", "Reprocessamento"]
 ];
@@ -54,6 +56,8 @@ export function AiCosts() {
   const [tab, setTab] = useState("analise");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [recalculating, setRecalculating] = useState(false);
 
   const query = useMemo(() => new URLSearchParams(Object.entries(filters).filter(([, value]) => value)).toString(), [filters]);
 
@@ -85,11 +89,41 @@ export function AiCosts() {
   useEffect(load, [query]);
 
   async function openDetail(id: number) {
-    setDetail(await getAiUsageDetail(id));
+    setError("");
+    try {
+      setDetail(await getAiUsageDetail(id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível carregar os detalhes da execução.");
+    }
+  }
+
+  async function recalculateCosts() {
+    setError("");
+    setMessage("");
+    setRecalculating(true);
+    try {
+      const preview = await recalculateAiUsageCosts(false);
+      if (!preview.recalculable_records) {
+        setMessage("Nenhum registro possui um preço ativo correspondente para recálculo.");
+        return;
+      }
+      const confirmed = window.confirm(
+        `Recalcular ${preview.recalculable_records} registros usando os preços ativos atuais? ` +
+        `${preview.unavailable_records} registros permanecerão sem custo por não possuírem preço correspondente.`
+      );
+      if (!confirmed) return;
+      const result = await recalculateAiUsageCosts(true);
+      setMessage(`${result.recalculable_records} registros recalculados com sucesso.`);
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível recalcular os custos.");
+    } finally {
+      setRecalculating(false);
+    }
   }
 
   if (loading && !dashboard) return <LoadingBlock label="Carregando custos de IA..." />;
-  if (error) return <ErrorBanner message={error} />;
+  if (error && !dashboard) return <ErrorBanner message={error} />;
   if (!dashboard) return null;
 
   const summary = dashboard.summary;
@@ -98,6 +132,8 @@ export function AiCosts() {
   return (
     <>
       <PageHeader title="Custos de IA" description="Analise custos, tokens, imagens, gargalos e alertas de uso da OpenAI por campanha, cliente, agente e rotina." />
+      {error && <ErrorBanner message={error} />}
+      {message && <div className="mb-4 rounded-md border border-accent/30 bg-accent-soft px-4 py-3 text-sm font-semibold text-accent-hover">{message}</div>}
 
       <Filters
         filters={filters}
@@ -106,13 +142,13 @@ export function AiCosts() {
         campaigns={campaigns}
         plans={plans}
         agents={agents}
-        models={prices.map((price) => price.model)}
+        models={dashboard.pricing_health.map((item) => item.model)}
       />
 
       <div className="mb-4 flex flex-wrap gap-2">
         {["analise", "rankings", "execucoes", "precos", "configuracoes"].map((item) => (
           <button key={item} className={`rounded-md px-3 py-2 text-sm font-medium ${tab === item ? "bg-brand text-white" : "bg-white text-slate-700"}`} onClick={() => setTab(item)}>
-            {item}
+            {uiLabel(item)}
           </button>
         ))}
         <a className="ml-auto inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold" href={`${API_URL}/ai-costs/export/csv?${query}`}>
@@ -129,13 +165,13 @@ export function AiCosts() {
       {tab === "analise" && (
         <div className="space-y-5">
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <Metric title="Custo total no periodo" value={money(summary.total_cost, currency)} />
+            <Metric title="Custo total no período" value={money(summary.total_cost, currency)} />
             <Metric title="Total de tokens" value={number(summary.total_tokens)} />
             <Metric title="Total de imagens geradas" value={number(summary.image_count)} />
-            <Metric title="Custo medio por campanha" value={money(summary.avg_cost_per_campaign, currency)} />
+            <Metric title="Custo médio por campanha" value={money(summary.avg_cost_per_campaign, currency)} />
             <Metric title="Cliente mais caro" value={summary.top_client?.name || "-"} sub={money(summary.top_client?.total_cost, currency)} />
             <Metric title="Agente mais caro" value={summary.top_agent?.name || summary.top_agent?.agent_key || "-"} sub={money(summary.top_agent?.total_cost, currency)} />
-            <Metric title="Maior execucao individual" value={number(summary.largest_execution?.total_tokens)} sub={money(summary.largest_execution?.total_estimated_cost, currency)} />
+            <Metric title="Maior execução individual" value={number(summary.largest_execution?.total_tokens)} sub={money(summary.largest_execution?.total_estimated_cost, currency)} />
             <Metric title="Percentual de erros" value={`${Math.round(Number(summary.error_rate ?? 0) * 100)}%`} sub={`${number(summary.error_count)} erros`} />
           </div>
 
@@ -155,7 +191,26 @@ export function AiCosts() {
 
       {tab === "rankings" && <Rankings rankings={dashboard.rankings} currency={currency} />}
       {tab === "execucoes" && <UsageTable logs={dashboard.logs} currency={currency} onDetail={openDetail} />}
-      {tab === "precos" && <PricesPanel prices={prices} onSave={async (payload) => setPrices(await saveAiModelPrice(payload))} />}
+      {tab === "precos" && (
+        <PricesPanel
+          prices={prices}
+          pricingHealth={dashboard.pricing_health}
+          recalculating={recalculating}
+          onRecalculate={recalculateCosts}
+          onSave={async (payload) => {
+            setError("");
+            try {
+              setPrices(await saveAiModelPrice(payload));
+              setDashboard(await getAiCosts(query));
+              setMessage("Preço salvo com sucesso.");
+              return true;
+            } catch (err) {
+              setError(err instanceof Error ? err.message : "Não foi possível salvar o preço.");
+              return false;
+            }
+          }}
+        />
+      )}
       {tab === "configuracoes" && <SettingsPanel settings={settings} setSettings={setSettings} onSave={async () => setSettings(await saveAiCostSettings(settings))} />}
 
       {detail && <DetailModal detail={detail} currency={currency} onClose={() => setDetail(null)} />}
@@ -178,15 +233,15 @@ function Filters(props: {
   return (
     <section className="panel mb-5 p-4">
       <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-5">
-        <Field label="Inicio" type="date" value={props.filters.start_date} onChange={(value) => set("start_date", value)} />
+        <Field label="Início" type="date" value={props.filters.start_date} onChange={(value) => set("start_date", value)} />
         <Field label="Fim" type="date" value={props.filters.end_date} onChange={(value) => set("end_date", value)} />
         <Select label="Cliente" value={props.filters.client_id} onChange={(value) => set("client_id", value)} options={[["", "Todos"], ...props.clients.map((item) => [String(item.id), item.name] as [string, string])]} />
         <Select label="Campanha" value={props.filters.campaign_id} onChange={(value) => set("campaign_id", value)} options={[["", "Todas"], ...props.campaigns.map((item) => [String(item.id), `${item.id} - ${item.cliente}`] as [string, string])]} />
         <Select label="Planejamento/rotina" value={props.filters.campaign_plan_id} onChange={(value) => set("campaign_plan_id", value)} options={[["", "Todos"], ...props.plans.map((item) => [String(item.id), item.name] as [string, string])]} />
         <Select label="Agente" value={props.filters.agent_id} onChange={(value) => set("agent_id", value)} options={[["", "Todos"], ...props.agents.map((item) => [String(item.id), item.name] as [string, string])]} />
         <Select label="Modelo" value={props.filters.model} onChange={(value) => set("model", value)} options={[["", "Todos"], ...props.models.map((item) => [item, item] as [string, string])]} />
-        <Select label="Status" value={props.filters.status} onChange={(value) => set("status", value)} options={[["", "Todos"], ["success", "success"], ["error", "error"]]} />
-        <Select label="Tipo de operacao" value={props.filters.operation_type} onChange={(value) => set("operation_type", value)} options={operationOptions as [string, string][]} />
+        <Select label="Situação" value={props.filters.status} onChange={(value) => set("status", value)} options={[["", "Todos"], ["success", "Sucesso"], ["error", "Erro"]]} />
+        <Select label="Tipo de operação" value={props.filters.operation_type} onChange={(value) => set("operation_type", value)} options={operationOptions as [string, string][]} />
         <div className="flex items-end">
           <button className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold" onClick={() => props.setFilters(emptyFilters)} type="button">
             Limpar filtros
@@ -212,10 +267,10 @@ function Insights({ alerts, insights }: { alerts: string[]; insights: string[] }
     <div className="grid gap-4 xl:grid-cols-2">
       <section className="panel p-4">
         <h2 className="mb-3 flex items-center gap-2 font-bold text-ink"><AlertTriangle size={17} /> Alertas</h2>
-        <List items={alerts} empty="Nenhum alerta no periodo filtrado." />
+        <List items={alerts} empty="Nenhum alerta no período filtrado." />
       </section>
       <section className="panel p-4">
-        <h2 className="mb-3 flex items-center gap-2 font-bold text-ink"><BarChart3 size={17} /> Insights automaticos</h2>
+        <h2 className="mb-3 flex items-center gap-2 font-bold text-ink"><BarChart3 size={17} /> Análises automáticas</h2>
         <List items={insights} empty="Sem insights suficientes para este filtro." />
       </section>
     </div>
@@ -252,7 +307,7 @@ function Rankings({ rankings, currency }: { rankings: AiCostDashboard["rankings"
       <Ranking title="Top 10 clientes mais caros" rows={rankings.clients} currency={currency} />
       <Ranking title="Top 10 campanhas mais caras" rows={rankings.campaigns} currency={currency} />
       <Ranking title="Top 10 agentes mais caros" rows={rankings.agents} currency={currency} />
-      <Ranking title="Top 10 execucoes mais caras" rows={rankings.executions} currency={currency} />
+      <Ranking title="Top 10 execuções mais caras" rows={rankings.executions} currency={currency} />
       <Ranking title="Top 10 rotinas mais caras" rows={rankings.routines} currency={currency} />
     </div>
   );
@@ -281,7 +336,7 @@ function UsageTable({ logs, currency, onDetail }: { logs: Array<Record<string, a
         <table className="min-w-full text-left text-sm">
           <thead className="bg-slate-50 text-xs uppercase text-slate-500">
             <tr>
-              {["Data", "Cliente", "Operacao", "Agente", "Modelo", "Tokens", "Custo", "Status", ""].map((item) => (
+              {["Data", "Cliente", "Operação", "Agente", "Modelo", "Tokens", "Custo", "Situação", ""].map((item) => (
                 <th key={item} className="px-3 py-2">{item}</th>
               ))}
             </tr>
@@ -291,12 +346,12 @@ function UsageTable({ logs, currency, onDetail }: { logs: Array<Record<string, a
               <tr key={log.id} className="border-t border-slate-100">
                 <td className="px-3 py-2">{new Date(log.created_at).toLocaleString("pt-BR")}</td>
                 <td className="px-3 py-2">{log.client_name || "-"}</td>
-                <td className="px-3 py-2">{log.operation_type}</td>
+                <td className="px-3 py-2">{uiLabel(log.operation_type)}</td>
                 <td className="px-3 py-2">{log.agent_name || log.agent_key || "-"}</td>
                 <td className="px-3 py-2">{log.model || "-"}</td>
                 <td className="px-3 py-2">{number(log.total_tokens)}</td>
                 <td className="px-3 py-2">{money(log.total_estimated_cost, currency)}</td>
-                <td className="px-3 py-2">{log.status}</td>
+                <td className="px-3 py-2">{uiLabel(log.status)}</td>
                 <td className="px-3 py-2">
                   <button className="rounded border border-slate-300 p-1" onClick={() => onDetail(Number(log.id))} title="Detalhe">
                     <Eye size={15} />
@@ -311,7 +366,19 @@ function UsageTable({ logs, currency, onDetail }: { logs: Array<Record<string, a
   );
 }
 
-function PricesPanel({ prices, onSave }: { prices: AiModelPrice[]; onSave: (payload: Record<string, unknown>) => Promise<void> }) {
+function PricesPanel({
+  prices,
+  pricingHealth,
+  recalculating,
+  onRecalculate,
+  onSave
+}: {
+  prices: AiModelPrice[];
+  pricingHealth: AiPricingHealth[];
+  recalculating: boolean;
+  onRecalculate: () => Promise<void>;
+  onSave: (payload: Record<string, unknown>) => Promise<boolean>;
+}) {
   const [rows, setRows] = useState<Record<number, Record<string, string>>>({});
   const [form, setForm] = useState<Record<string, string>>({
     model: "",
@@ -334,7 +401,7 @@ function PricesPanel({ prices, onSave }: { prices: AiModelPrice[]; onSave: (payl
             output_price_per_1m_tokens: String(price.output_price_per_1m_tokens),
             image_price: String(price.image_price),
             currency: price.currency,
-            active: String(price.active)
+            active: price.active ? "1" : "0"
           }
         ])
       )
@@ -343,8 +410,8 @@ function PricesPanel({ prices, onSave }: { prices: AiModelPrice[]; onSave: (payl
 
   async function submitNew(event: FormEvent) {
     event.preventDefault();
-    await onSave({ ...form, active: form.active === "1" });
-    setForm({ model: "", input_price_per_1m_tokens: "0", output_price_per_1m_tokens: "0", image_price: "0", currency: form.currency || "USD", active: "1" });
+    const saved = await onSave({ ...form, active: form.active === "1" });
+    if (saved) setForm({ model: "", input_price_per_1m_tokens: "0", output_price_per_1m_tokens: "0", image_price: "0", currency: form.currency || "USD", active: "1" });
   }
 
   async function saveRow(id: number) {
@@ -368,18 +435,44 @@ function PricesPanel({ prices, onSave }: { prices: AiModelPrice[]; onSave: (payl
   }
 
   return (
-    <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
+    <div className="space-y-4">
+      <section className="panel p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="font-bold text-ink">Validação dos preços</h2>
+            <p className="mt-1 text-sm text-slate-500">Modelos usados sem preço ativo deixam o custo da execução zerado.</p>
+          </div>
+          <button
+            className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold disabled:opacity-60"
+            type="button"
+            disabled={recalculating}
+            onClick={() => void onRecalculate()}
+          >
+            <RefreshCcw className={recalculating ? "animate-spin" : ""} size={15} />
+            {recalculating ? "Recalculando..." : "Recalcular histórico"}
+          </button>
+        </div>
+        <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+          {pricingHealth.map((item) => (
+            <div key={item.model} className={`rounded-md border px-3 py-2 text-sm ${item.status === "configured" ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}>
+              <p className="font-semibold text-ink">{item.model}</p>
+              <p className="text-xs text-slate-600">{pricingStatusLabel(item.status)} · {number(item.usage_count)} registros</p>
+            </div>
+          ))}
+        </div>
+      </section>
+      <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
       <section className="panel overflow-hidden">
         <div className="border-b border-slate-200 p-4">
-          <h2 className="font-bold text-ink">Precos por modelo</h2>
-          <p className="mt-1 text-sm text-slate-500">Edite valores por 1 milhao de tokens e custo unitario de imagem. As execucoes futuras salvam snapshot desses valores.</p>
+          <h2 className="font-bold text-ink">Preços por modelo</h2>
+          <p className="mt-1 text-sm text-slate-500">Edite valores por 1 milhão de tokens e o custo unitário de imagem. As execuções futuras salvam uma cópia desses valores.</p>
         </div>
         <table className="min-w-full text-left text-sm">
           <thead className="bg-slate-50 text-xs uppercase text-slate-500">
             <tr>
               <th className="px-3 py-2">Modelo</th>
-              <th className="px-3 py-2">Input / 1M tokens</th>
-              <th className="px-3 py-2">Output / 1M tokens</th>
+              <th className="px-3 py-2">Entrada / 1M tokens</th>
+              <th className="px-3 py-2">Saída / 1M tokens</th>
               <th className="px-3 py-2">Imagem</th>
               <th className="px-3 py-2">Moeda</th>
               <th className="px-3 py-2">Ativo</th>
@@ -413,7 +506,7 @@ function PricesPanel({ prices, onSave }: { prices: AiModelPrice[]; onSave: (payl
                   <td className="px-3 py-2">
                     <select className="field w-24" value={row.active} onChange={(event) => updateRow(price.id, "active", event.target.value)}>
                       <option value="1">sim</option>
-                      <option value="0">nao</option>
+                      <option value="0">não</option>
                     </select>
                   </td>
                   <td className="px-3 py-2">
@@ -430,15 +523,23 @@ function PricesPanel({ prices, onSave }: { prices: AiModelPrice[]; onSave: (payl
       <form className="panel p-4" onSubmit={submitNew}>
         <h2 className="mb-3 font-bold text-ink">Adicionar modelo</h2>
         <Field label="Modelo" value={form.model} onChange={(value) => setForm((current) => ({ ...current, model: value }))} />
-        <Field label="Input / 1M tokens" type="number" value={form.input_price_per_1m_tokens} onChange={(value) => setForm((current) => ({ ...current, input_price_per_1m_tokens: value }))} />
-        <Field label="Output / 1M tokens" type="number" value={form.output_price_per_1m_tokens} onChange={(value) => setForm((current) => ({ ...current, output_price_per_1m_tokens: value }))} />
+        <Field label="Entrada / 1M tokens" type="number" value={form.input_price_per_1m_tokens} onChange={(value) => setForm((current) => ({ ...current, input_price_per_1m_tokens: value }))} />
+        <Field label="Saída / 1M tokens" type="number" value={form.output_price_per_1m_tokens} onChange={(value) => setForm((current) => ({ ...current, output_price_per_1m_tokens: value }))} />
         <Field label="Imagem" type="number" value={form.image_price} onChange={(value) => setForm((current) => ({ ...current, image_price: value }))} />
         <Select label="Moeda" value={form.currency} onChange={(value) => setForm((current) => ({ ...current, currency: value }))} options={[["USD", "USD"], ["BRL", "BRL"]]} />
-        <Select label="Ativo" value={form.active} onChange={(value) => setForm((current) => ({ ...current, active: value }))} options={[["1", "sim"], ["0", "nao"]]} />
-        <button className="mt-3 inline-flex items-center gap-2 rounded-md bg-brand px-3 py-2 text-sm font-semibold text-white"><Save size={15} /> Adicionar preco</button>
+        <Select label="Ativo" value={form.active} onChange={(value) => setForm((current) => ({ ...current, active: value }))} options={[["1", "Sim"], ["0", "Não"]]} />
+        <button className="mt-3 inline-flex items-center gap-2 rounded-md bg-brand px-3 py-2 text-sm font-semibold text-white"><Save size={15} /> Adicionar preço</button>
       </form>
+      </div>
     </div>
   );
+}
+
+function pricingStatusLabel(status: AiPricingHealth["status"]) {
+  if (status === "configured") return "Preço configurado";
+  if (status === "missing") return "Preço não cadastrado";
+  if (status === "inactive") return "Preço inativo";
+  return "Preço zerado";
 }
 
 function SettingsPanel({ settings, setSettings, onSave }: { settings: Record<string, string>; setSettings: React.Dispatch<React.SetStateAction<Record<string, string>>>; onSave: () => Promise<void> }) {
@@ -446,16 +547,16 @@ function SettingsPanel({ settings, setSettings, onSave }: { settings: Record<str
     <section className="panel max-w-3xl p-4">
       <div className="grid gap-3 md:grid-cols-2">
         {[
-          ["ai_cost_max_per_campaign", "Custo maximo por campanha"],
-          ["ai_cost_max_per_client_month", "Custo maximo por cliente por mes"],
-          ["ai_cost_max_per_routine", "Custo maximo por rotina"],
-          ["ai_default_currency", "Moeda padrao"]
+          ["ai_cost_max_per_campaign", "Custo máximo por campanha"],
+          ["ai_cost_max_per_client_month", "Custo máximo por cliente por mês"],
+          ["ai_cost_max_per_routine", "Custo máximo por rotina"],
+          ["ai_default_currency", "Moeda padrão"]
         ].map(([key, label]) => (
           <Field key={key} label={label} value={settings[key] ?? ""} onChange={(value) => setSettings((current) => ({ ...current, [key]: value }))} />
         ))}
-        <Select label="Acao ao ultrapassar limite" value={settings.ai_cost_limit_mode ?? "alert"} onChange={(value) => setSettings((current) => ({ ...current, ai_cost_limit_mode: value }))} options={[["alert", "Apenas alertar"], ["block", "Bloquear geracao"]]} />
+        <Select label="Ação ao ultrapassar limite" value={settings.ai_cost_limit_mode ?? "alert"} onChange={(value) => setSettings((current) => ({ ...current, ai_cost_limit_mode: value }))} options={[["alert", "Apenas alertar"], ["block", "Bloquear geração"]]} />
       </div>
-      <button className="mt-4 inline-flex items-center gap-2 rounded-md bg-brand px-3 py-2 text-sm font-semibold text-white" onClick={onSave}><Save size={15} /> Salvar configuracoes</button>
+      <button className="mt-4 inline-flex items-center gap-2 rounded-md bg-brand px-3 py-2 text-sm font-semibold text-white" onClick={onSave}><Save size={15} /> Salvar configurações</button>
     </section>
   );
 }
@@ -465,24 +566,24 @@ function DetailModal({ detail, currency, onClose }: { detail: Record<string, unk
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <section className="max-h-[90vh] w-full max-w-4xl overflow-auto rounded-md bg-white p-5">
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-bold text-ink">Detalhe de Execucao #{String(detail.id)}</h2>
+          <h2 className="text-lg font-bold text-ink">Detalhe da Execução #{String(detail.id)}</h2>
           <button className="rounded-md border border-slate-300 px-3 py-1 text-sm" onClick={onClose}>Fechar</button>
         </div>
         <div className="grid gap-3 md:grid-cols-3">
           <Metric title="Agente" value={String(detail.agent_name || detail.agent_key || "-")} />
           <Metric title="Modelo" value={String(detail.model || "-")} />
           <Metric title="Custo" value={money(detail.total_estimated_cost, currency)} />
-          <Metric title="Tokens" value={number(detail.total_tokens)} sub={`in ${number(detail.input_tokens)} / out ${number(detail.output_tokens)}`} />
+          <Metric title="Tokens" value={number(detail.total_tokens)} sub={`entrada ${number(detail.input_tokens)} / saída ${number(detail.output_tokens)}`} />
           <Metric title="Cliente" value={String(detail.client_name || "-")} />
           <Metric title="Campanha" value={String(detail.campaign_name || detail.campaign_id || "-")} />
           <Metric title="Tempo" value={`${number(detail.latency_ms)}ms`} />
-          <Metric title="Contexto" value={`${number(detail.context_characters)} chars`} />
-          <Metric title="Status" value={String(detail.status)} />
+          <Metric title="Contexto" value={`${number(detail.context_characters)} caracteres`} />
+          <Metric title="Situação" value={uiLabel(String(detail.status))} />
         </div>
         {Boolean(detail.error_message) && <div className="mt-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{String(detail.error_message)}</div>}
         <div className="mt-4 grid gap-4 md:grid-cols-2">
-          <Pre title="Input resumido" value={String(detail.metadata_json || "").slice(0, 2000)} />
-          <Pre title="Output resumido" value={String(detail.price_snapshot_json || "").slice(0, 2000)} />
+          <Pre title="Entrada resumida" value={String(detail.metadata_json || "").slice(0, 2000)} />
+          <Pre title="Preços aplicados" value={String(detail.price_snapshot_json || "").slice(0, 2000)} />
         </div>
       </section>
     </div>

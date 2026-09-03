@@ -9,7 +9,7 @@ export function ProtectedRoute() {
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-mist p-6">
-        <LoadingBlock label="Validando sessao..." />
+        <LoadingBlock label="Validando sessão..." />
       </div>
     );
   }

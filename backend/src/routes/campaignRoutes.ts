@@ -1,9 +1,10 @@
 import { Router } from "express";
 import fs from "node:fs";
-import path from "node:path";
 import multer from "multer";
+import { config } from "../config.js";
 import {
   createCampaignController,
+  creativeNavigationController,
   duplicateCampaignController,
   getCampaignController,
   listCampaignsController,
@@ -49,6 +50,7 @@ import {
   aiModelPricesController,
   aiUsageDetailController,
   exportAiUsageController,
+  recalculateAiUsageController,
   saveAiCostSettingsController,
   saveAiModelPriceController
 } from "../controllers/aiCostController.js";
@@ -64,7 +66,7 @@ import {
 } from "../controllers/whatsappController.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 
-const uploadDir = path.resolve("uploads");
+const uploadDir = config.uploadFilesDir;
 fs.mkdirSync(uploadDir, { recursive: true });
 
 const upload = multer({
@@ -77,6 +79,7 @@ export const campaignRoutes = Router();
 campaignRoutes.get("/campaigns", asyncHandler(listCampaignsController));
 campaignRoutes.post("/campaigns", upload.single("referencia_arquivo"), asyncHandler(createCampaignController));
 campaignRoutes.get("/campaigns/:id", asyncHandler(getCampaignController));
+campaignRoutes.get("/campaigns/:id/navigation", asyncHandler(creativeNavigationController));
 campaignRoutes.get("/campaigns/:id/duplicate", asyncHandler(duplicateCampaignController));
 campaignRoutes.post("/campaigns/:id/learning", asyncHandler(saveCampaignLearningController));
 campaignRoutes.patch("/campaigns/:id/status", asyncHandler(updateCampaignStatusController));
@@ -125,5 +128,6 @@ campaignRoutes.get("/ai-costs/export/:format", asyncHandler(exportAiUsageControl
 campaignRoutes.get("/ai-costs/usage/:id", asyncHandler(aiUsageDetailController));
 campaignRoutes.get("/ai-costs/model-prices", asyncHandler(aiModelPricesController));
 campaignRoutes.post("/ai-costs/model-prices", asyncHandler(saveAiModelPriceController));
+campaignRoutes.post("/ai-costs/recalculate", asyncHandler(recalculateAiUsageController));
 campaignRoutes.get("/ai-costs/settings", asyncHandler(aiCostSettingsController));
 campaignRoutes.put("/ai-costs/settings", asyncHandler(saveAiCostSettingsController));

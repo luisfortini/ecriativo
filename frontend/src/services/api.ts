@@ -3,8 +3,10 @@ import type {
   AgentExecutionLog,
   AgentTestResult,
   AiCostDashboard,
+  AiCostRecalculation,
   AiModelPrice,
   CampaignDetail,
+  CreativeNavigation,
   CampaignGenerationLog,
   CampaignPlan,
   CampaignQueueItem,
@@ -36,7 +38,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
       clearAuthToken();
       window.dispatchEvent(new Event("auth:unauthorized"));
     }
-    throw new Error(payload?.message ?? "Nao foi possivel falar com o servidor.");
+    throw new Error(payload?.message ?? "Não foi possível falar com o servidor.");
   }
 
   return payload as T;
@@ -66,6 +68,10 @@ export function getCampaign(id: string) {
   return request<CampaignDetail>(`/campaigns/${id}`);
 }
 
+export function getCreativeNavigation(id: string | number) {
+  return request<CreativeNavigation>(`/campaigns/${id}/navigation`);
+}
+
 export function getCreatives() {
   return request<CreativeHistoryItem[]>("/creatives");
 }
@@ -89,11 +95,11 @@ export function saveCampaignLearning(id: number, action: string, value?: string)
   });
 }
 
-export function updateCampaignStatus(id: number, status: "approved" | "rejected") {
+export function updateCampaignStatus(id: number, status: "approved" | "rejected", reason?: string, tags: string[] = []) {
   return request<CampaignDetail>(`/campaigns/${id}/status`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ status })
+    body: JSON.stringify({ status, reason, tags })
   });
 }
 
@@ -253,6 +259,14 @@ export function saveAiModelPrice(payload: Record<string, unknown>) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
+  });
+}
+
+export function recalculateAiUsageCosts(apply = false) {
+  return request<AiCostRecalculation>("/ai-costs/recalculate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ apply })
   });
 }
 

@@ -41,7 +41,7 @@ export function Clients() {
       const client = await createClient(form);
       navigate(`/clientes/${client.id}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Nao foi possivel salvar o cliente.");
+      setError(err instanceof Error ? err.message : "Não foi possível salvar o cliente.");
     } finally {
       setSaving(false);
     }
@@ -49,7 +49,7 @@ export function Clients() {
 
   return (
     <>
-      <PageHeader title="Clientes" description="Perfis criativos com memoria estrategica, visual, restricoes e aprendizados por marca." />
+      <PageHeader title="Clientes" description="Perfis criativos com memória estratégica, visual, restrições e aprendizados por marca." />
       {error && <ErrorBanner message={error} />}
 
       <div className="grid gap-6 xl:grid-cols-[1fr_420px]">
@@ -68,10 +68,10 @@ export function Clients() {
                     </div>
                     <div>
                       <h2 className="font-bold text-ink">{client.name}</h2>
-                      <p className="text-sm text-slate-500">{client.segment || "Segmento nao informado"}</p>
+                      <p className="text-sm text-slate-500">{client.segment || "Segmento não informado"}</p>
                     </div>
                   </div>
-                  <p className="text-sm text-slate-700">{client.brand_voice || "Tom de voz ainda nao definido."}</p>
+                  <p className="text-sm text-slate-700">{client.brand_voice || "Tom de voz ainda não definido."}</p>
                   <p className="mt-2 text-xs text-slate-500">{client.color_palette || "Paleta pendente"}</p>
                 </Link>
               ))}
@@ -87,8 +87,8 @@ export function Clients() {
           <div className="space-y-3">
             <Field label="Nome" name="name" value={form.name} onChange={setForm} required />
             <Field label="Segmento" name="segment" value={form.segment} onChange={setForm} />
-            <Field label="Descricao do negocio" name="business_description" value={form.business_description} onChange={setForm} />
-            <Field label="Publico-alvo principal" name="target_audience" value={form.target_audience} onChange={setForm} />
+            <Field label="Descrição do negócio" name="business_description" value={form.business_description} onChange={setForm} />
+            <Field label="Público-alvo principal" name="target_audience" value={form.target_audience} onChange={setForm} />
             <Field label="Tom de voz" name="brand_voice" value={form.brand_voice} onChange={setForm} />
             <Field label="Posicionamento" name="positioning" value={form.positioning} onChange={setForm} />
             <Field label="Paleta de cores" name="color_palette" value={form.color_palette} onChange={setForm} />

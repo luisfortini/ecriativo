@@ -1,4 +1,4 @@
-import { all, get, run } from "../db/connection.js";
+import { all, get, run, transaction } from "../db/connection.js";
 import {
   creativeBriefToLegacyStrategy,
   creativeOutputToLegacy,
@@ -6,6 +6,7 @@ import {
   type CreativeOutput
 } from "../contracts/index.js";
 import type { CampaignRecord, ClientProfile, NewCampaignInput, NormalizedBriefing } from "../types.js";
+import { AppError } from "../utils/errors.js";
 import { executeAgentByKey } from "./agentService.js";
 import { updateAiUsageCampaign } from "./aiCostService.js";
 import { analyzeClientBrand } from "./brandAnalysisService.js";
@@ -281,7 +282,8 @@ export async function duplicateCampaign(id: number) {
 export async function listCampaigns() {
   return all(
     `SELECT c.id, c.client_id, COALESCE(c.cliente, cl.name) AS cliente, COALESCE(c.segmento, cl.segment) AS segmento,
-              c.objetivo, c.formato, COALESCE(c.final_image_url, c.image_url) AS image_url, c.status, c.created_at
+              c.objetivo, c.formato, COALESCE(c.final_image_url, c.image_url) AS image_url,
+              c.image_url AS generated_image_url, c.status, c.created_at
        FROM campaigns c
        LEFT JOIN clients cl ON cl.id = c.client_id
        ORDER BY c.created_at DESC`
@@ -293,7 +295,8 @@ export async function listCreatives() {
     `SELECT c.id, c.client_id, COALESCE(c.cliente, cl.name) AS cliente, c.formato,
               COALESCE(c.creative_output_json, c.creative_json) AS creative_json,
               COALESCE(c.strategist_output_json, c.strategy_json) AS strategy_json,
-              COALESCE(c.final_image_url, c.image_url) AS image_url, c.created_at
+              COALESCE(c.final_image_url, c.image_url) AS image_url,
+              c.image_url AS generated_image_url, c.created_at
        FROM campaigns c
        LEFT JOIN clients cl ON cl.id = c.client_id
        WHERE COALESCE(c.final_image_url, c.image_url) IS NOT NULL
@@ -307,6 +310,7 @@ export async function listCreatives() {
         cliente: item.cliente,
         formato: item.formato,
         image_url: item.image_url,
+        generated_image_url: item.generated_image_url ?? null,
         creative: JSON.parse(item.creative_json),
         strategy: JSON.parse(item.strategy_json),
         created_at: item.created_at
@@ -334,7 +338,15 @@ export async function getCampaign(id: number) {
     strategy: JSON.parse(strategyJson),
     creative: JSON.parse(creativeJson),
     normalized_briefing: campaign.normalized_briefing_json ? JSON.parse(campaign.normalized_briefing_json) : null,
-    pipeline_run: await getLatestCampaignPipelineRun(id)
+    pipeline_run: await getLatestCampaignPipelineRun(id),
+    reviews: await all(
+      `SELECT r.*, u.name reviewer_name
+       FROM campaign_reviews r
+       LEFT JOIN users u ON u.id = r.user_id
+       WHERE r.campaign_id = ?
+       ORDER BY r.created_at DESC, r.id DESC`,
+      [id]
+    )
   };
 }
 
@@ -358,7 +370,64 @@ export async function saveCampaignLearning(campaignId: number, action: string, v
   return appendClientLearning(campaign.client_id, learning.field, learning.value);
 }
 
-export async function updateCampaignStatus(campaignId: number, status: "approved" | "rejected") {
-  await run("UPDATE campaigns SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", [status, campaignId]);
+export async function updateCampaignStatus(
+  campaignId: number,
+  status: "approved" | "rejected",
+  reason: string | undefined,
+  userId: number | null,
+  tags: string[] = []
+) {
+  const normalizedReason = reason?.trim() || null;
+  if (status === "rejected" && !normalizedReason) throw new AppError("Informe o motivo da reprovação.", 422);
+  const campaign = await get<{ client_id: number | null }>("SELECT client_id FROM campaigns WHERE id = ?", [campaignId]);
+  if (!campaign) throw new AppError("Campanha não encontrada.", 404);
+
+  await transaction(async (client) => {
+    await run(
+      "UPDATE campaigns SET creative_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+      [status, campaignId],
+      client
+    );
+    await run(
+      `INSERT INTO campaign_reviews (campaign_id, client_id, user_id, decision, reason, tags_json)
+       VALUES (?, ?, ?, ?, ?, ?::jsonb)`,
+      [campaignId, campaign.client_id, userId, status, normalizedReason, JSON.stringify(tags)],
+      client
+    );
+  });
   return getCampaign(campaignId);
+}
+
+export async function getCreativeNavigation(id: number) {
+  const current = await get<{ id: number }>(
+    `SELECT id
+     FROM campaigns
+     WHERE id = ?`,
+    [id]
+  );
+  if (!current) return null;
+
+  const [previous, next] = await Promise.all([
+    get<{ id: number }>(
+      `SELECT id FROM campaigns
+       WHERE COALESCE(final_image_url, image_url) IS NOT NULL
+         AND (created_at, id) > (SELECT created_at, id FROM campaigns WHERE id = ?)
+       ORDER BY created_at ASC, id ASC
+       LIMIT 1`,
+      [current.id]
+    ),
+    get<{ id: number }>(
+      `SELECT id FROM campaigns
+       WHERE COALESCE(final_image_url, image_url) IS NOT NULL
+         AND (created_at, id) < (SELECT created_at, id FROM campaigns WHERE id = ?)
+       ORDER BY created_at DESC, id DESC
+       LIMIT 1`,
+      [current.id]
+    )
+  ]);
+
+  return {
+    previous_id: previous ? Number(previous.id) : null,
+    next_id: next ? Number(next.id) : null
+  };
 }

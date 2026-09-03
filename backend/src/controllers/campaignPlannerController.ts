@@ -4,6 +4,7 @@ import {
   activatePlan,
   cancelPending,
   createPlan,
+  duplicatePlan,
   generateNow,
   getPlan,
   listGenerationLogs,
@@ -44,7 +45,7 @@ export async function listPlansController(_req: Request, res: Response) {
 
 export async function getPlanController(req: Request, res: Response) {
   const plan = await getPlan(Number(req.params.id));
-  if (!plan) throw new AppError("Planejamento nao encontrado.", 404);
+  if (!plan) throw new AppError("Planejamento não encontrado.", 404);
   res.json(plan);
 }
 
@@ -87,7 +88,11 @@ export async function planActionController(req: Request, res: Response) {
     res.json(await generateNow(id));
     return;
   }
-  throw new AppError("Acao invalida.", 404);
+  if (action === "duplicate") {
+    res.status(201).json(await duplicatePlan(id));
+    return;
+  }
+  throw new AppError("Ação inválida.", 404);
 }
 
 export async function listQueueController(req: Request, res: Response) {

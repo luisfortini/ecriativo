@@ -43,9 +43,9 @@ export function WhatsappSettings() {
     setMessage("");
     try {
       setForm({ ...defaults, ...(await saveWhatsappSettings(form)) } as Record<string, string | boolean>);
-      setMessage("Configuracoes salvas.");
+      setMessage("Configurações salvas.");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Nao foi possivel salvar.");
+      setError(err instanceof Error ? err.message : "Não foi possível salvar.");
     } finally {
       setSaving(false);
     }
@@ -56,9 +56,9 @@ export function WhatsappSettings() {
     setMessage("");
     try {
       await testWhatsappConnection();
-      setMessage("Conexao com a Evolution API validada.");
+      setMessage("Conexão com a Evolution API validada.");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Falha ao testar conexao.");
+      setError(err instanceof Error ? err.message : "Falha ao testar conexão.");
     }
   }
 
@@ -92,12 +92,12 @@ export function WhatsappSettings() {
 
         <div className="grid gap-4 md:grid-cols-2">
           <Field label="URL base da Evolution API" value={String(form.evolution_base_url)} onChange={(value) => setForm((current) => ({ ...current, evolution_base_url: value }))} />
-          <Field label="API Key" value={String(form.evolution_api_key)} onChange={(value) => setForm((current) => ({ ...current, evolution_api_key: value }))} />
+          <Field label="Chave da API" value={String(form.evolution_api_key)} onChange={(value) => setForm((current) => ({ ...current, evolution_api_key: value }))} />
           <Field label="Nome da instância" value={String(form.evolution_instance_name)} onChange={(value) => setForm((current) => ({ ...current, evolution_instance_name: value }))} />
           <Field label="Número padrão para notificações" value={String(form.default_notification_phone)} onChange={(value) => setForm((current) => ({ ...current, default_notification_phone: value }))} />
-          <Field label="Endpoint texto" value={String(form.evolution_text_endpoint_path)} onChange={(value) => setForm((current) => ({ ...current, evolution_text_endpoint_path: value }))} />
-          <Field label="Endpoint imagem" value={String(form.evolution_image_endpoint_path)} onChange={(value) => setForm((current) => ({ ...current, evolution_image_endpoint_path: value }))} />
-          <Field label="Endpoint conexão" value={String(form.evolution_connection_endpoint_path)} onChange={(value) => setForm((current) => ({ ...current, evolution_connection_endpoint_path: value }))} />
+          <Field label="Caminho para envio de texto" value={String(form.evolution_text_endpoint_path)} onChange={(value) => setForm((current) => ({ ...current, evolution_text_endpoint_path: value }))} />
+          <Field label="Caminho para envio de imagem" value={String(form.evolution_image_endpoint_path)} onChange={(value) => setForm((current) => ({ ...current, evolution_image_endpoint_path: value }))} />
+          <Field label="Caminho para testar a conexão" value={String(form.evolution_connection_endpoint_path)} onChange={(value) => setForm((current) => ({ ...current, evolution_connection_endpoint_path: value }))} />
         </div>
 
         <div className="mt-5 grid gap-3 md:grid-cols-2">

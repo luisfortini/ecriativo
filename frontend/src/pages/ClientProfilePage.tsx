@@ -6,6 +6,7 @@ import { LoadingBlock } from "../components/LoadingBlock";
 import { PageHeader } from "../components/PageHeader";
 import { analyzeClientBrand, applyBrandAnalysis, getClient, getClientWhatsappSettings, reanalyzeClientMaterials, saveClientWhatsappSettings, updateClient, uploadClientAsset } from "../services/api";
 import type { ClientAssetType, ClientProfile } from "../types";
+import { uiLabel } from "../utils/uiLabels";
 
 const fields = {
   name: "",
@@ -30,7 +31,30 @@ const fields = {
   instagram_url: ""
 };
 
-const tabs = ["Dados gerais", "Identidade visual", "Tom de voz", "Referencias", "Restricoes", "Analise de Marca", "Historico", "Aprendizados", "Notificações"];
+const fieldLabels: Record<keyof typeof fields, string> = {
+  name: "Nome",
+  segment: "Segmento",
+  business_description: "Descrição do negócio",
+  target_audience: "Público-alvo",
+  differentiators: "Diferenciais",
+  brand_voice: "Tom de voz",
+  positioning: "Posicionamento",
+  color_palette: "Paleta de cores",
+  forbidden_colors: "Cores proibidas",
+  preferred_typography: "Tipografia preferida",
+  visual_references: "Referências visuais",
+  approved_styles: "Estilos aprovados",
+  forbidden_styles: "Estilos proibidos",
+  communication_restrictions: "Restrições de comunicação",
+  preferred_ctas: "Chamadas para ação preferidas",
+  segment_policies: "Políticas do segmento",
+  strategic_notes: "Observações estratégicas",
+  brand_memory_summary: "Resumo da memória da marca",
+  site_url: "Site",
+  instagram_url: "Instagram"
+};
+
+const tabs = ["Dados gerais", "Identidade visual", "Tom de voz", "Referências", "Restrições", "Análise de Marca", "Histórico", "Aprendizados", "Notificações"];
 
 const notificationDefaults: Record<string, string | boolean> = {
   responsible_phone: "",
@@ -46,13 +70,13 @@ const assetLabels: Record<ClientAssetType, string> = {
   logo_main: "Logo principal",
   logo_white: "Logo branca",
   logo_dark: "Logo escura",
-  reference_image: "Imagem de referencia",
+  reference_image: "Imagem de referência",
   approved_ad: "Arte aprovada",
   rejected_ad: "Arte reprovada",
   instagram_screenshot: "Print de Instagram",
   website_screenshot: "Print de site",
-  approved_reference: "Referencia aprovada",
-  rejected_reference: "Referencia reprovada",
+  approved_reference: "Referência aprovada",
+  rejected_reference: "Referência reprovada",
   previous_campaign: "Campanha anterior",
   brand_material: "Material da marca"
 };
@@ -101,7 +125,7 @@ export function ClientProfilePage() {
       const updated = await updateClient(client.id, form);
       setClient(updated);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Nao foi possivel salvar o perfil.");
+      setError(err instanceof Error ? err.message : "Não foi possível salvar o perfil.");
     } finally {
       setSaving(false);
     }
@@ -136,7 +160,7 @@ export function ClientProfilePage() {
       setAnalysisResult(result);
       load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Nao foi possivel analisar a marca.");
+      setError(err instanceof Error ? err.message : "Não foi possível analisar a marca.");
     } finally {
       setSaving(false);
     }
@@ -151,7 +175,7 @@ export function ClientProfilePage() {
       setAnalysisResult(result);
       load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Nao foi possivel reanalisar materiais.");
+      setError(err instanceof Error ? err.message : "Não foi possível reanalisar materiais.");
     } finally {
       setSaving(false);
     }
@@ -160,7 +184,7 @@ export function ClientProfilePage() {
   async function applySuggestion(field: string) {
     const analysisId = analysisResult?.analysis.id ?? client?.brand_analyses?.[0]?.id;
     if (!client || !analysisId) {
-      setError("Execute uma analise de marca antes de aplicar sugestoes.");
+      setError("Execute uma análise de marca antes de aplicar sugestões.");
       return;
     }
     setSaving(true);
@@ -170,7 +194,7 @@ export function ClientProfilePage() {
       setClient(updated);
       setForm(Object.fromEntries(Object.keys(fields).map((item) => [item, String(updated[item as keyof ClientProfile] ?? "")])) as typeof fields);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Nao foi possivel aplicar a sugestao.");
+      setError(err instanceof Error ? err.message : "Não foi possível aplicar a sugestão.");
     } finally {
       setSaving(false);
     }
@@ -181,7 +205,7 @@ export function ClientProfilePage() {
     const comparison = analysisResult?.comparison ?? (client ? buildComparisonFromLatest(client) : []);
     const fieldsToApply = comparison.filter((item) => item.suggestion).map((item) => item.field);
     if (!client || !analysisId || fieldsToApply.length === 0) {
-      setError("Execute uma analise de marca antes de aplicar aprendizados.");
+      setError("Execute uma análise de marca antes de aplicar aprendizados.");
       return;
     }
     setSaving(true);
@@ -191,7 +215,7 @@ export function ClientProfilePage() {
       setClient(updated);
       setForm(Object.fromEntries(Object.keys(fields).map((item) => [item, String(updated[item as keyof ClientProfile] ?? "")])) as typeof fields);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Nao foi possivel aplicar os aprendizados.");
+      setError(err instanceof Error ? err.message : "Não foi possível aplicar os aprendizados.");
     } finally {
       setSaving(false);
     }
@@ -204,7 +228,7 @@ export function ClientProfilePage() {
     try {
       setNotificationForm({ ...notificationDefaults, ...(await saveClientWhatsappSettings(client.id, notificationForm)) } as Record<string, string | boolean>);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Nao foi possivel salvar notificacoes.");
+      setError(err instanceof Error ? err.message : "Não foi possível salvar notificações.");
     } finally {
       setSaving(false);
     }
@@ -214,18 +238,18 @@ export function ClientProfilePage() {
     if (tab === "Dados gerais") return ["name", "segment", "business_description", "target_audience", "differentiators", "positioning", "site_url", "instagram_url"];
     if (tab === "Identidade visual") return ["color_palette", "forbidden_colors", "preferred_typography"];
     if (tab === "Tom de voz") return ["brand_voice", "preferred_ctas"];
-    if (tab === "Referencias") return ["visual_references", "approved_styles"];
-    if (tab === "Restricoes") return ["forbidden_styles", "communication_restrictions", "segment_policies"];
+    if (tab === "Referências") return ["visual_references", "approved_styles"];
+    if (tab === "Restrições") return ["forbidden_styles", "communication_restrictions", "segment_policies"];
     if (tab === "Aprendizados") return ["brand_memory_summary", "strategic_notes"];
     return [];
   }, [tab]);
 
   if (loading) return <LoadingBlock label="Carregando cliente..." />;
-  if (!client) return <ErrorBanner message={error || "Cliente nao encontrado."} />;
+  if (!client) return <ErrorBanner message={error || "Cliente não encontrado."} />;
 
   return (
     <>
-      <PageHeader title={client.name} description="Perfil Criativo do Cliente: memoria estrategica e visual usada automaticamente pelos agentes." />
+      <PageHeader title={client.name} description="Perfil criativo do cliente: memória estratégica e visual usada automaticamente pelos agentes." />
       {error && <ErrorBanner message={error} />}
 
       <div className="mb-5 flex gap-2 overflow-x-auto">
@@ -241,7 +265,7 @@ export function ClientProfilePage() {
         ))}
       </div>
 
-      {tab === "Analise de Marca" ? (
+      {tab === "Análise de Marca" ? (
         <BrandAnalysisTab
           client={client}
           form={form}
@@ -266,12 +290,12 @@ export function ClientProfilePage() {
         />
       ) : tab === "Notificações" ? (
         <NotificationTab form={notificationForm} setForm={setNotificationForm} saving={saving} onSave={saveNotifications} />
-      ) : tab === "Historico" ? (
+      ) : tab === "Histórico" ? (
         <div className="panel overflow-hidden">
           {client.campaigns.map((campaign) => (
             <Link key={campaign.id} className="block border-b border-slate-100 p-4 last:border-b-0 hover:bg-slate-50" to={`/campanhas/${campaign.id}`}>
               <p className="font-semibold text-ink">{campaign.objetivo || "Campanha sem objetivo nomeado"}</p>
-              <p className="text-sm text-slate-500">{campaign.status} · {new Date(campaign.created_at).toLocaleString("pt-BR")}</p>
+              <p className="text-sm text-slate-500">{uiLabel(campaign.status)} · {new Date(campaign.created_at).toLocaleString("pt-BR")}</p>
             </Link>
           ))}
         </div>
@@ -298,7 +322,7 @@ export function ClientProfilePage() {
                   <option key={value} value={value}>{label}</option>
                 ))}
               </select>
-              <label className="label">Descricao</label>
+              <label className="label">Descrição</label>
               <input className="field mb-3" value={assetDescription} onChange={(event) => setAssetDescription(event.target.value)} />
               <label className="flex cursor-pointer flex-col items-center gap-2 rounded-md border border-dashed border-slate-300 bg-slate-50 p-5 text-sm text-slate-600">
                 <ImageUp size={22} className="text-brand" />
@@ -306,17 +330,17 @@ export function ClientProfilePage() {
                 <input className="sr-only" type="file" accept="image/*,.pdf" onChange={(event) => setAssetFile(event.target.files?.[0] ?? null)} />
               </label>
               <button className="mt-3 w-full rounded-md bg-accent px-4 py-2 text-sm font-semibold text-white" disabled={!assetFile}>
-                Adicionar asset
+                Adicionar arquivo
               </button>
             </form>
 
             <div className="panel p-5">
-              <h2 className="mb-3 font-bold text-ink">Assets cadastrados</h2>
+              <h2 className="mb-3 font-bold text-ink">Arquivos cadastrados</h2>
               <div className="space-y-3">
                 {client.assets.map((asset) => (
                   <a key={asset.id} className="block rounded-md border border-slate-200 p-3 text-sm hover:border-brand" href={asset.file_url} target="_blank">
                     <p className="font-semibold text-ink">{assetLabels[asset.type]}</p>
-                    <p className="text-slate-500">{asset.description || "Sem descricao"}</p>
+                    <p className="text-slate-500">{asset.description || "Sem descrição"}</p>
                     {asset.ai_summary && <p className="mt-2 text-xs text-slate-500">{asset.ai_summary}</p>}
                   </a>
                 ))}
@@ -330,7 +354,7 @@ export function ClientProfilePage() {
 }
 
 function TextField(props: { field: keyof typeof fields; value: string; onChange: React.Dispatch<React.SetStateAction<typeof fields>> }) {
-  const label = props.field.replace(/_/g, " ");
+  const label = fieldLabels[props.field];
   const isLong = !["name", "segment", "color_palette", "forbidden_colors", "preferred_typography"].includes(props.field);
   return (
     <div className={isLong ? "md:col-span-2" : undefined}>
@@ -371,10 +395,10 @@ function NotificationTab(props: {
           </select>
         </div>
         <div>
-          <label className="label">Status</label>
+          <label className="label">Situação</label>
           <select className="field" value={props.form.active ? "1" : "0"} onChange={(event) => props.setForm((current) => ({ ...current, active: event.target.value === "1" }))}>
-            <option value="1">ativo</option>
-            <option value="0">inativo</option>
+            <option value="1">Ativo</option>
+            <option value="0">Inativo</option>
           </select>
         </div>
       </div>
@@ -432,7 +456,7 @@ function BrandAnalysisTab(props: {
     <div className="grid gap-6 xl:grid-cols-[1fr_380px]">
       <section className="space-y-4">
         <div className="panel p-5">
-          <h2 className="mb-4 font-bold text-ink">Analisar presenca digital</h2>
+          <h2 className="mb-4 font-bold text-ink">Analisar presença digital</h2>
           <div className="grid gap-4 md:grid-cols-2">
             <div>
               <label className="label">Site</label>
@@ -443,7 +467,7 @@ function BrandAnalysisTab(props: {
               <input className="field" value={props.form.instagram_url} onChange={(event) => props.setForm((current) => ({ ...current, instagram_url: event.target.value }))} />
             </div>
           </div>
-          <label className="label mt-4">Textos copiados da bio, legendas ou observacoes manuais</label>
+          <label className="label mt-4">Textos copiados da bio, legendas ou observações manuais</label>
           <textarea className="field min-h-28" value={props.manualNotes} onChange={(event) => props.setManualNotes(event.target.value)} />
           <button className="mt-4 rounded-md bg-brand px-4 py-2 text-sm font-semibold text-white" type="button" onClick={props.onAnalyze} disabled={props.saving}>
             {props.saving ? "Analisando..." : "Analisar marca com IA"}
@@ -452,7 +476,7 @@ function BrandAnalysisTab(props: {
 
         <div className="panel p-5">
           <div className="mb-4 flex items-center justify-between gap-3">
-            <h2 className="font-bold text-ink">Revisao antes de salvar</h2>
+            <h2 className="font-bold text-ink">Revisão antes de salvar</h2>
             <div className="flex flex-wrap gap-2">
               <button className="rounded-md border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700" type="button" onClick={() => props.onApply("approved_styles")}>
                 Salvar como estilo aprovado
@@ -470,7 +494,7 @@ function BrandAnalysisTab(props: {
           </div>
           <div className="space-y-3">
             {latest.length === 0 ? (
-              <p className="text-sm text-slate-500">Execute uma analise para comparar valor atual e sugestao da IA.</p>
+              <p className="text-sm text-slate-500">Execute uma análise para comparar o valor atual e a sugestão da IA.</p>
             ) : (
               latest.map((item) => (
                 <div key={item.field} className="rounded-md border border-slate-200 p-4">
@@ -483,11 +507,11 @@ function BrandAnalysisTab(props: {
                   <div className="grid gap-3 md:grid-cols-2">
                     <div>
                       <p className="label">Valor atual</p>
-                      <p className="whitespace-pre-wrap rounded-md bg-slate-50 p-3 text-sm text-slate-700">{item.current || "Nao preenchido"}</p>
+                      <p className="whitespace-pre-wrap rounded-md bg-slate-50 p-3 text-sm text-slate-700">{item.current || "Não preenchido"}</p>
                     </div>
                     <div>
-                      <p className="label">Sugestao da IA</p>
-                      <p className="whitespace-pre-wrap rounded-md bg-accent-soft p-3 text-sm text-accent-hover">{item.suggestion || "Sem sugestao"}</p>
+                      <p className="label">Sugestão da IA</p>
+                      <p className="whitespace-pre-wrap rounded-md bg-accent-soft p-3 text-sm text-accent-hover">{item.suggestion || "Sem sugestão"}</p>
                     </div>
                   </div>
                 </div>
@@ -499,22 +523,22 @@ function BrandAnalysisTab(props: {
 
       <aside className="space-y-4">
         <div className="panel p-5">
-          <h2 className="mb-3 font-bold text-ink">Diagnostico oficial</h2>
+          <h2 className="mb-3 font-bold text-ink">Diagnóstico oficial</h2>
           {activeDiagnostic ? (
             <div className="space-y-2 text-sm text-slate-700">
-              <p><strong>Versao:</strong> {activeDiagnostic.version} · schema {activeDiagnostic.schema_version}</p>
-              <p><strong>Confianca:</strong> {Math.round(activeDiagnostic.payload.confidenceScore * 100)}%</p>
+              <p><strong>Versão:</strong> {activeDiagnostic.version} · esquema {activeDiagnostic.schema_version}</p>
+              <p><strong>Confiança:</strong> {Math.round(activeDiagnostic.payload.confidenceScore * 100)}%</p>
               <p><strong>Posicionamento:</strong> {activeDiagnostic.payload.positioning}</p>
-              <p className="text-xs text-slate-500">Este diagnostico sera reutilizado pelos pipelines enquanto permanecer ativo.</p>
+              <p className="text-xs text-slate-500">Este diagnóstico será reutilizado pelos fluxos enquanto permanecer ativo.</p>
             </div>
           ) : (
-            <p className="text-sm text-slate-500">Nenhum ProfileDiagnostic ativo. Uma nova analise criara a versao inicial.</p>
+            <p className="text-sm text-slate-500">Nenhum diagnóstico de perfil ativo. Uma nova análise criará a versão inicial.</p>
           )}
         </div>
 
         <form className="panel p-5" onSubmit={props.onUpload}>
-          <h2 className="mb-4 font-bold text-ink">Analisar por referencias enviadas</h2>
-          <label className="label">Classificacao</label>
+          <h2 className="mb-4 font-bold text-ink">Analisar por referências enviadas</h2>
+          <label className="label">Classificação</label>
           <select className="field mb-3" value={props.assetType} onChange={(event) => props.setAssetType(event.target.value as ClientAssetType)}>
             {Object.entries(assetLabels).map(([value, label]) => (
               <option key={value} value={value}>{label}</option>
@@ -528,7 +552,7 @@ function BrandAnalysisTab(props: {
             <option value="manter estilo">Manter estilo</option>
             <option value="evitar estilo">Evitar estilo</option>
           </select>
-          <label className="label">Descricao</label>
+          <label className="label">Descrição</label>
           <textarea className="field mb-3 min-h-20" value={props.assetDescription} onChange={(event) => props.setAssetDescription(event.target.value)} />
           <label className="flex cursor-pointer flex-col items-center gap-2 rounded-md border border-dashed border-slate-300 bg-slate-50 p-5 text-sm text-slate-600">
             <ImageUp size={22} className="text-brand" />
@@ -549,16 +573,16 @@ function BrandAnalysisTab(props: {
         </form>
 
         <div className="panel p-5">
-          <h2 className="mb-3 font-bold text-ink">Historico de analises</h2>
+          <h2 className="mb-3 font-bold text-ink">Histórico de análises</h2>
           <div className="space-y-3">
             {props.client.brand_analyses?.map((analysis) => (
               <div key={analysis.id} className="rounded-md border border-slate-200 p-3 text-sm">
                 <p className="font-semibold text-ink">{analysis.source_type}</p>
                 <p className="text-xs text-slate-500">{new Date(analysis.created_at).toLocaleString("pt-BR")}</p>
-                <p className="mt-2 text-slate-600">{analysis.suggested_visual_style || analysis.suggested_positioning || "Analise salva"}</p>
+                <p className="mt-2 text-slate-600">{analysis.suggested_visual_style || analysis.suggested_positioning || "Análise salva"}</p>
               </div>
             ))}
-            {props.client.brand_analyses?.length === 0 && <p className="text-sm text-slate-500">Nenhuma analise salva ainda.</p>}
+            {props.client.brand_analyses?.length === 0 && <p className="text-sm text-slate-500">Nenhuma análise salva ainda.</p>}
           </div>
         </div>
       </aside>
@@ -572,10 +596,10 @@ function buildComparisonFromLatest(client: ClientProfile) {
   return [
     { field: "brand_voice", label: "Tom de voz", current: client.brand_voice, suggestion: latest.suggested_brand_voice || "" },
     { field: "positioning", label: "Posicionamento", current: client.positioning, suggestion: latest.suggested_positioning || "" },
-    { field: "target_audience", label: "Publico-alvo", current: client.target_audience, suggestion: latest.suggested_target_audience || "" },
+    { field: "target_audience", label: "Público-alvo", current: client.target_audience, suggestion: latest.suggested_target_audience || "" },
     { field: "color_palette", label: "Paleta de cores", current: client.color_palette, suggestion: latest.suggested_color_palette || "" },
-    { field: "visual_style", label: "Referencias visuais", current: client.visual_references, suggestion: latest.suggested_visual_style || "" },
+    { field: "visual_style", label: "Referências visuais", current: client.visual_references, suggestion: latest.suggested_visual_style || "" },
     { field: "common_ctas", label: "CTAs preferidos", current: client.preferred_ctas, suggestion: latest.suggested_ctas || "" },
-    { field: "restrictions", label: "Restricoes recomendadas", current: client.communication_restrictions, suggestion: latest.suggested_restrictions || "" }
+    { field: "restrictions", label: "Restrições recomendadas", current: client.communication_restrictions, suggestion: latest.suggested_restrictions || "" }
   ];
 }

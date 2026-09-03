@@ -5,6 +5,7 @@ import {
   getAiCostSettings,
   getAiUsageDetail,
   listAiModelPrices,
+  recalculateAiUsageCosts,
   updateAiCostSettings,
   upsertAiModelPrice
 } from "../services/aiCostService.js";
@@ -34,6 +35,10 @@ export async function aiCostSettingsController(_req: Request, res: Response) {
 
 export async function saveAiCostSettingsController(req: Request, res: Response) {
   res.json(await updateAiCostSettings(req.body));
+}
+
+export async function recalculateAiUsageController(req: Request, res: Response) {
+  res.json(await recalculateAiUsageCosts(req.body?.apply === true));
 }
 
 export async function exportAiUsageController(req: Request, res: Response) {

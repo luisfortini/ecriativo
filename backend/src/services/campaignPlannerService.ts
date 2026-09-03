@@ -1,4 +1,6 @@
-import { all, get, run } from "../db/connection.js";
+import type { PoolClient } from "pg";
+import { all, get, run, transaction } from "../db/connection.js";
+import { AppError } from "../utils/errors.js";
 import type { CampaignFormat } from "../types.js";
 import { createCampaign, setCampaignCreativeStatus } from "./campaignService.js";
 import { getClient } from "./clientService.js";
@@ -64,6 +66,7 @@ export async function getPlan(id: number) {
 }
 
 export async function createPlan(input: PlanInput) {
+  const initialStatus = input.status === "active" ? "draft" : input.status;
   const result = await run(
     `INSERT INTO campaign_plans (
         name, theme, strategic_description, objective, start_date, end_date, recurrence_type,
@@ -87,7 +90,7 @@ export async function createPlan(input: PlanInput) {
       input.min_interval_minutes,
       input.approval_mode,
       input.variation_mode,
-      input.status
+      initialStatus
     ]
   );
   const id = Number(result.lastInsertRowid);
@@ -97,45 +100,116 @@ export async function createPlan(input: PlanInput) {
 }
 
 export async function updatePlan(id: number, input: PlanInput) {
-  await run(
-    `UPDATE campaign_plans SET
-      name = ?, theme = ?, strategic_description = ?, objective = ?, start_date = ?, end_date = ?,
-      recurrence_type = ?, recurrence_days_json = ?, preferred_time = ?, ads_per_client = ?,
-      ad_format = ?, max_ads_per_day = ?, max_ads_per_hour = ?, min_interval_minutes = ?,
-      approval_mode = ?, variation_mode = ?, status = ?, updated_at = CURRENT_TIMESTAMP
-     WHERE id = ?`,
-    [
-      input.name,
-      input.theme,
-      input.strategic_description ?? null,
-      input.objective,
-      input.start_date,
-      input.end_date,
-      input.recurrence_type,
-      JSON.stringify(input.recurrence_days ?? []),
-      input.preferred_time ?? null,
-      input.ads_per_client,
-      input.ad_format,
-      input.max_ads_per_day,
-      input.max_ads_per_hour,
-      input.min_interval_minutes,
-      input.approval_mode,
-      input.variation_mode,
-      input.status,
-      id
-    ]
+  const existing = await get<PlannerPlan>("SELECT * FROM campaign_plans WHERE id = ?", [id]);
+  if (!existing) throw new AppError("Planejamento não encontrado.", 404);
+  if (!["draft", "paused"].includes(existing.status)) {
+    throw new AppError(existing.status === "active" ? "Pause o planejamento antes de editá-lo." : "Planejamentos concluídos não podem ser editados; duplique o planejamento para criar uma nova versão.", 409);
+  }
+  const processing = await get<{ total: number }>(
+    "SELECT COUNT(*)::int total FROM campaign_generation_queue WHERE campaign_plan_id = ? AND status = 'processing'",
+    [id]
   );
-  await run("DELETE FROM campaign_plan_clients WHERE campaign_plan_id = ?", [id]);
-  await savePlanClients(id, input.clients, input.ads_per_client);
+  if (Number(processing?.total ?? 0) > 0) throw new AppError("Aguarde o item em processamento terminar antes de editar.", 409);
+
+  await transaction(async (client) => {
+    await run(
+      `UPDATE campaign_plans SET
+        name = ?, theme = ?, strategic_description = ?, objective = ?, start_date = ?, end_date = ?,
+        recurrence_type = ?, recurrence_days_json = ?, preferred_time = ?, ads_per_client = ?,
+        ad_format = ?, max_ads_per_day = ?, max_ads_per_hour = ?, min_interval_minutes = ?,
+        approval_mode = ?, variation_mode = ?, status = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+      [
+        input.name,
+        input.theme,
+        input.strategic_description ?? null,
+        input.objective,
+        input.start_date,
+        input.end_date,
+        input.recurrence_type,
+        JSON.stringify(input.recurrence_days ?? []),
+        input.preferred_time ?? null,
+        input.ads_per_client,
+        input.ad_format,
+        input.max_ads_per_day,
+        input.max_ads_per_hour,
+        input.min_interval_minutes,
+        input.approval_mode,
+        input.variation_mode,
+        existing.status,
+        id
+      ],
+      client
+    );
+    await run(
+      "UPDATE campaign_generation_queue SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE campaign_plan_id = ? AND status IN ('pending', 'failed')",
+      [id],
+      client
+    );
+    await run("DELETE FROM campaign_plan_clients WHERE campaign_plan_id = ?", [id], client);
+    await savePlanClients(id, input.clients, input.ads_per_client, client);
+
+    const queueExists = await get<{ total: number }>(
+      "SELECT COUNT(*)::int total FROM campaign_generation_queue WHERE campaign_plan_id = ?",
+      [id],
+      client
+    );
+    if (Number(queueExists?.total ?? 0) > 0) {
+      const completed = await all<{ client_id: number; total: number }>(
+        `SELECT client_id, COUNT(*)::int total
+         FROM campaign_generation_queue
+         WHERE campaign_plan_id = ? AND status = 'completed'
+         GROUP BY client_id`,
+        [id],
+        client
+      );
+      const completedByClient = new Map(completed.map((item) => [Number(item.client_id), Number(item.total)]));
+      const remainingClients = input.clients
+        .map((item) => ({
+          client_id: item.client_id,
+          ads_quantity: Math.max(0, (item.ads_quantity || input.ads_per_client) - (completedByClient.get(item.client_id) ?? 0))
+        }))
+        .filter((item) => item.ads_quantity > 0);
+      const updatedPlan = { ...existing, ...input, id, status: existing.status, recurrence_days_json: JSON.stringify(input.recurrence_days ?? []) } as PlannerPlan;
+      await createQueueForPlan(updatedPlan, remainingClients, client);
+    }
+    await logPlan(null, id, null, "updated", "Planejamento atualizado; itens futuros da fila foram recalculados.", undefined, client);
+  });
   return getPlan(id);
+}
+
+export async function duplicatePlan(id: number) {
+  const plan = await getPlan(id);
+  if (!plan) throw new AppError("Planejamento não encontrado.", 404);
+  const record = plan as unknown as Record<string, unknown> & { clients: Array<{ client_id: number; ads_quantity: number }> };
+  return createPlan({
+    name: `${String(record.name)} (cópia)`,
+    theme: String(record.theme),
+    strategic_description: record.strategic_description ? String(record.strategic_description) : undefined,
+    objective: String(record.objective),
+    start_date: String(record.start_date),
+    end_date: String(record.end_date),
+    recurrence_type: record.recurrence_type as RecurrenceType,
+    recurrence_days: safeArray(record.recurrence_days_json as string | null),
+    preferred_time: record.preferred_time ? String(record.preferred_time) : undefined,
+    ads_per_client: Number(record.ads_per_client),
+    ad_format: record.ad_format as CampaignFormat,
+    max_ads_per_day: Number(record.max_ads_per_day),
+    max_ads_per_hour: Number(record.max_ads_per_hour),
+    min_interval_minutes: Number(record.min_interval_minutes),
+    approval_mode: record.approval_mode as ApprovalMode,
+    variation_mode: String(record.variation_mode),
+    status: "draft",
+    clients: record.clients.map((client) => ({ client_id: Number(client.client_id), ads_quantity: Number(client.ads_quantity) }))
+  });
 }
 
 export async function activatePlan(id: number) {
   const plan = await get<PlannerPlan>("SELECT * FROM campaign_plans WHERE id = ?", [id]);
   if (!plan) throw new Error("Planejamento nao encontrado.");
-  await run("UPDATE campaign_plans SET status = 'active', updated_at = CURRENT_TIMESTAMP WHERE id = ?", [id]);
   const existing = await get<{ total: number }>("SELECT COUNT(*) AS total FROM campaign_generation_queue WHERE campaign_plan_id = ?", [id]);
   if (Number(existing?.total ?? 0) === 0) await createQueueForPlan(plan);
+  await run("UPDATE campaign_plans SET status = 'active', updated_at = CURRENT_TIMESTAMP WHERE id = ?", [id]);
   await logPlan(null, id, null, "active", "Planejamento ativado e fila criada.");
   return getPlan(id);
 }
@@ -327,28 +401,35 @@ async function processQueueItem(item: QueueItem) {
   }
 }
 
-async function savePlanClients(planId: number, clients: PlanInput["clients"], defaultQuantity: number) {
+async function savePlanClients(planId: number, clients: PlanInput["clients"], defaultQuantity: number, client?: PoolClient) {
   await Promise.all(clients.map((item) => run(
     "INSERT INTO campaign_plan_clients (campaign_plan_id, client_id, ads_quantity) VALUES (?, ?, ?)",
-    [planId, item.client_id, item.ads_quantity || defaultQuantity]
+    [planId, item.client_id, item.ads_quantity || defaultQuantity],
+    client
   )));
 }
 
-async function createQueueForPlan(plan: PlannerPlan) {
-  const clients = await all<{
+async function createQueueForPlan(plan: PlannerPlan, selectedClients?: Array<{ client_id: number; ads_quantity: number }>, dbClient?: PoolClient) {
+  const clients = selectedClients ?? await all<{
     client_id: number;
     ads_quantity: number;
-  }>("SELECT * FROM campaign_plan_clients WHERE campaign_plan_id = ?", [plan.id]);
-  const schedule = buildSchedule(plan, clients.reduce((sum, item) => sum + item.ads_quantity, 0));
-  const retryAttempts = Number((await getSettings()).default_retry_attempts ?? 3);
+  }>("SELECT * FROM campaign_plan_clients WHERE campaign_plan_id = ?", [plan.id], dbClient);
+  const requestedItems = clients.reduce((sum, item) => sum + item.ads_quantity, 0);
+  const schedule = buildSchedule(plan, requestedItems);
+  if (schedule.length < requestedItems) {
+    throw new AppError("O período e os limites informados não comportam todas as campanhas. Amplie o período ou os limites de geração.", 422);
+  }
+  const retrySetting = await get<{ value: string }>("SELECT value FROM app_settings WHERE key = 'default_retry_attempts'", undefined, dbClient);
+  const retryAttempts = Number(retrySetting?.value ?? 3);
   let index = 0;
-  for (const client of clients) {
-    for (let i = 0; i < client.ads_quantity; i += 1) {
+  for (const queueClient of clients) {
+    for (let i = 0; i < queueClient.ads_quantity; i += 1) {
       await run(
         `INSERT INTO campaign_generation_queue (
           campaign_plan_id, client_id, scheduled_at, priority, max_attempts, variation_type
         ) VALUES (?, ?, ?, ?, ?, ?)`,
-        [plan.id, client.client_id, schedule[index]?.toISOString() ?? new Date().toISOString(), 5, retryAttempts, variations[index % variations.length]]
+        [plan.id, queueClient.client_id, schedule[index].toISOString(), 5, retryAttempts, variations[index % variations.length]],
+        dbClient
       );
       index += 1;
     }
@@ -409,7 +490,7 @@ async function getSettings() {
   return Object.fromEntries((await all<{ key: string; value: string }>("SELECT key, value FROM app_settings")).map((row) => [row.key, row.value]));
 }
 
-async function logPlan(queueId: number | null, planId: number | null, clientId: number | null, status: string, message: string, metadata?: unknown) {
+async function logPlan(queueId: number | null, planId: number | null, clientId: number | null, status: string, message: string, metadata?: unknown, client?: PoolClient) {
   await run("INSERT INTO campaign_generation_logs (queue_id, campaign_plan_id, client_id, status, message, metadata_json) VALUES (?, ?, ?, ?, ?, ?)", [
     queueId,
     planId,
@@ -417,7 +498,7 @@ async function logPlan(queueId: number | null, planId: number | null, clientId: 
     status,
     message,
     metadata ? JSON.stringify(metadata) : null
-  ]);
+  ], client);
 }
 
 async function completePlanIfDone(planId: number) {

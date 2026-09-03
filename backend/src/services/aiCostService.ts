@@ -1,4 +1,4 @@
-import { all as dbAll, get, run, toPostgresBoolean } from "../db/connection.js";
+import { all as dbAll, get, run, toPostgresBoolean, transaction } from "../db/connection.js";
 
 export type AiOperationType =
   | "normalizacao_briefing"
@@ -36,7 +36,8 @@ export async function recordAiUsage(input: UsageInput) {
   const outputTokens = input.outputTokens ?? 0;
   const totalTokens = inputTokens + outputTokens;
   const imageCount = input.imageCount ?? 0;
-  const price = await getActiveModelPrice(input.model);
+  const priceLookup = await getActiveModelPrice(input.model);
+  const price = priceLookup.price;
   const inputCost = (inputTokens / 1_000_000) * price.input_price_per_1m_tokens;
   const outputCost = (outputTokens / 1_000_000) * price.output_price_per_1m_tokens;
   const imageCost = imageCount * price.image_price;
@@ -47,7 +48,8 @@ export async function recordAiUsage(input: UsageInput) {
     input_price_per_1m_tokens: price.input_price_per_1m_tokens,
     output_price_per_1m_tokens: price.output_price_per_1m_tokens,
     image_price: price.image_price,
-    currency: price.currency
+    currency: price.currency,
+    price_found: priceLookup.found
   });
 
   const result = await run(
@@ -86,7 +88,10 @@ export async function recordAiUsage(input: UsageInput) {
       contextCharacters: input.contextCharacters ?? 0,
       latencyMs: input.latencyMs ?? null,
       errorMessage: input.errorMessage ?? null,
-      metadataJson: input.metadata ? JSON.stringify(input.metadata) : null,
+      metadataJson: JSON.stringify({
+        ...(isRecord(input.metadata) ? input.metadata : input.metadata === undefined ? {} : { detail: input.metadata }),
+        pricing_status: priceLookup.found ? "matched" : "missing"
+      }),
       priceSnapshot,
       sourceLogId: input.sourceLogId ?? null,
       createdAt: input.createdAt ?? null
@@ -113,10 +118,13 @@ export async function upsertAiModelPrice(input: Record<string, unknown>) {
     input: Number(input.input_price_per_1m_tokens ?? 0),
     output: Number(input.output_price_per_1m_tokens ?? 0),
     image: Number(input.image_price ?? 0),
-    currency: String(input.currency ?? "USD").trim() || "USD",
+    currency: String(input.currency ?? "USD").trim().toUpperCase() || "USD",
     active: toPostgresBoolean(input.active)
   };
   if (!payload.model) throw new Error("Informe o modelo.");
+  if (![payload.input, payload.output, payload.image].every((value) => Number.isFinite(value) && value >= 0)) {
+    throw new Error("Os preços devem ser números maiores ou iguais a zero.");
+  }
   if (id) {
     await run(
       `UPDATE ai_model_prices
@@ -141,6 +149,139 @@ export async function upsertAiModelPrice(input: Record<string, unknown>) {
     );
   }
   return listAiModelPrices();
+}
+
+export async function getAiPricingHealth() {
+  const rows = await dbAll<{
+    model: string;
+    usage_count: number;
+    input_tokens: number;
+    output_tokens: number;
+    image_count: number;
+    price_id: number | null;
+    active: boolean | null;
+    input_price_per_1m_tokens: number | null;
+    output_price_per_1m_tokens: number | null;
+    image_price: number | null;
+  }>(
+    `WITH model_names AS (
+       SELECT model FROM ai_usage_logs
+       WHERE model IS NOT NULL AND length(trim(model)) > 0
+       UNION
+       SELECT model FROM agents
+       WHERE is_active = TRUE AND model IS NOT NULL AND length(trim(model)) > 0
+     ), used_models AS (
+       SELECT model,
+              COUNT(*)::int usage_count,
+              COALESCE(SUM(input_tokens), 0)::bigint input_tokens,
+              COALESCE(SUM(output_tokens), 0)::bigint output_tokens,
+              COALESCE(SUM(image_count), 0)::bigint image_count
+       FROM ai_usage_logs
+       WHERE model IS NOT NULL AND length(trim(model)) > 0
+       GROUP BY model
+     )
+     SELECT n.model, COALESCE(u.usage_count, 0) usage_count,
+            COALESCE(u.input_tokens, 0) input_tokens,
+            COALESCE(u.output_tokens, 0) output_tokens,
+            COALESCE(u.image_count, 0) image_count,
+            p.id price_id, p.active, p.input_price_per_1m_tokens,
+            p.output_price_per_1m_tokens, p.image_price
+     FROM model_names n
+     LEFT JOIN used_models u ON u.model = n.model
+     LEFT JOIN ai_model_prices p ON p.model = n.model
+     ORDER BY n.model`
+  );
+
+  return rows.map((row) => {
+    const hasTextUsage = Number(row.input_tokens) + Number(row.output_tokens) > 0;
+    const hasImageUsage = Number(row.image_count) > 0;
+    let status: "configured" | "missing" | "inactive" | "zero_price" = "configured";
+    if (!row.price_id) status = "missing";
+    else if (!row.active) status = "inactive";
+    else if (
+      (hasTextUsage && Number(row.input_price_per_1m_tokens) === 0 && Number(row.output_price_per_1m_tokens) === 0) ||
+      (hasImageUsage && Number(row.image_price) === 0)
+    ) status = "zero_price";
+
+    return {
+      ...row,
+      usage_count: Number(row.usage_count),
+      input_tokens: Number(row.input_tokens),
+      output_tokens: Number(row.output_tokens),
+      image_count: Number(row.image_count),
+      status
+    };
+  });
+}
+
+export async function recalculateAiUsageCosts(apply: boolean) {
+  const [usageRows, priceRows] = await Promise.all([
+    dbAll<UsageCostRow>(
+      `SELECT id, model, input_tokens, output_tokens, image_count, total_estimated_cost
+       FROM ai_usage_logs
+       ORDER BY id`
+    ),
+    dbAll<PriceModelRow>("SELECT * FROM ai_model_prices WHERE active = TRUE")
+  ]);
+  const priceByModel = new Map(priceRows.map((price) => [price.model, price]));
+  const recalculated: RecalculatedUsage[] = [];
+  const unavailableModels = new Map<string, number>();
+
+  for (const usage of usageRows) {
+    const model = usage.model?.trim() || "(sem modelo)";
+    const price = usage.model ? priceByModel.get(usage.model) : undefined;
+    if (!price) {
+      unavailableModels.set(model, (unavailableModels.get(model) ?? 0) + 1);
+      continue;
+    }
+    const inputCost = (Number(usage.input_tokens) / 1_000_000) * Number(price.input_price_per_1m_tokens);
+    const outputCost = (Number(usage.output_tokens) / 1_000_000) * Number(price.output_price_per_1m_tokens);
+    const imageCost = Number(usage.image_count) * Number(price.image_price);
+    recalculated.push({
+      id: Number(usage.id),
+      inputCost,
+      outputCost,
+      totalCost: inputCost + outputCost,
+      imageCost,
+      totalEstimatedCost: inputCost + outputCost + imageCost,
+      priceSnapshot: JSON.stringify({
+        model: usage.model,
+        input_price_per_1m_tokens: Number(price.input_price_per_1m_tokens),
+        output_price_per_1m_tokens: Number(price.output_price_per_1m_tokens),
+        image_price: Number(price.image_price),
+        currency: price.currency,
+        price_found: true,
+        recalculated: true,
+        recalculated_at: new Date().toISOString()
+      }),
+      previousCost: Number(usage.total_estimated_cost)
+    });
+  }
+
+  if (apply && recalculated.length) {
+    await transaction(async (client) => {
+      for (const item of recalculated) {
+        await run(
+          `UPDATE ai_usage_logs SET
+             input_cost = ?, output_cost = ?, total_cost = ?, image_cost = ?,
+             total_estimated_cost = ?, price_snapshot_json = ?
+           WHERE id = ?`,
+          [item.inputCost, item.outputCost, item.totalCost, item.imageCost, item.totalEstimatedCost, item.priceSnapshot, item.id],
+          client
+        );
+      }
+    });
+  }
+
+  return {
+    applied: apply,
+    total_records: usageRows.length,
+    recalculable_records: recalculated.length,
+    unavailable_records: usageRows.length - recalculated.length,
+    previous_total_cost: recalculated.reduce((sum, item) => sum + item.previousCost, 0),
+    recalculated_total_cost: recalculated.reduce((sum, item) => sum + item.totalEstimatedCost, 0),
+    unavailable_models: Array.from(unavailableModels, ([model, records]) => ({ model, records }))
+  };
 }
 
 export async function getAiCostSettings() {
@@ -235,6 +376,8 @@ export async function getAiCostDashboard(filters: Record<string, unknown>) {
     params
   );
 
+  const pricingHealth = await getAiPricingHealth();
+
   return {
     summary: {
       ...summary,
@@ -250,7 +393,8 @@ export async function getAiCostDashboard(filters: Record<string, unknown>) {
     groups,
     rankings,
     insights: buildInsights(summary, groups),
-    alerts: await buildAlerts(summary, groups, rankings),
+    alerts: await buildAlerts(summary, groups, rankings, pricingHealth),
+    pricing_health: pricingHealth,
     logs
   };
 }
@@ -300,7 +444,10 @@ export async function exportAiUsage(format: string, filters: Record<string, unkn
 
 async function getActiveModelPrice(model?: string | null) {
   const row = model ? await get<PriceRow>("SELECT * FROM ai_model_prices WHERE model = ? AND active = TRUE ORDER BY updated_at DESC LIMIT 1", [model]) : undefined;
-  return row ?? ({ input_price_per_1m_tokens: 0, output_price_per_1m_tokens: 0, image_price: 0, currency: "USD" } as PriceRow);
+  return {
+    found: Boolean(row),
+    price: row ?? ({ input_price_per_1m_tokens: 0, output_price_per_1m_tokens: 0, image_price: 0, currency: "USD" } as PriceRow)
+  };
 }
 
 function buildWhere(filters: Record<string, unknown>) {
@@ -373,7 +520,12 @@ function buildInsights(summary: Record<string, unknown>, groups: Record<string, 
   return insights;
 }
 
-async function buildAlerts(summary: Record<string, unknown>, groups: Record<string, Record<string, unknown>[]>, rankings: Record<string, Record<string, unknown>[]>) {
+async function buildAlerts(
+  summary: Record<string, unknown>,
+  groups: Record<string, Record<string, unknown>[]>,
+  rankings: Record<string, Record<string, unknown>[]>,
+  pricingHealth: Array<{ model: string; status: string }>
+) {
   const alerts: string[] = [];
   if (Number(summary.excessive_context_count ?? 0) > 0) alerts.push("Execucao acima de 10k tokens de entrada ou contexto muito grande detectada.");
   if (Number(summary.error_count ?? 0) > 0) alerts.push("Ha erros recorrentes que podem consumir tokens.");
@@ -382,6 +534,10 @@ async function buildAlerts(summary: Record<string, unknown>, groups: Record<stri
   if (routineLimit && (rankings.routines ?? []).some((item) => Number(item.total_cost ?? 0) > routineLimit)) alerts.push("Rotina consumindo mais que o limite configurado.");
   const clientLimit = Number(settings.ai_cost_max_per_client_month ?? 0);
   if (clientLimit && (groups.costByClient ?? []).some((item) => Number(item.value ?? 0) > clientLimit)) alerts.push("Cliente com custo acima do esperado.");
+  for (const item of pricingHealth.filter((entry) => entry.status !== "configured")) {
+    const reason = item.status === "missing" ? "não possui preço cadastrado" : item.status === "inactive" ? "está com o preço inativo" : "está com preço zero";
+    alerts.push(`O modelo ${item.model} ${reason}; os custos correspondentes serão registrados como zero.`);
+  }
   return alerts;
 }
 
@@ -395,4 +551,32 @@ interface PriceRow {
   output_price_per_1m_tokens: number;
   image_price: number;
   currency: string;
+}
+
+interface PriceModelRow extends PriceRow {
+  model: string;
+}
+
+interface UsageCostRow {
+  id: number;
+  model: string | null;
+  input_tokens: number;
+  output_tokens: number;
+  image_count: number;
+  total_estimated_cost: number;
+}
+
+interface RecalculatedUsage {
+  id: number;
+  inputCost: number;
+  outputCost: number;
+  totalCost: number;
+  imageCost: number;
+  totalEstimatedCost: number;
+  priceSnapshot: string;
+  previousCost: number;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

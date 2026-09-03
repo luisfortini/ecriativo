@@ -178,7 +178,7 @@ function imageSize(format: CampaignFormat) {
 }
 
 async function saveGeneratedImage(buffer: Buffer, extension: "png" | "webp" | "jpg" | "svg") {
-  const dir = path.resolve("generated");
+  const dir = config.generatedFilesDir;
   await fs.mkdir(dir, { recursive: true });
   const filename = `${Date.now()}-${Math.random().toString(16).slice(2)}.${extension}`;
   const imagePath = path.join(dir, filename);

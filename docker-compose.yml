@@ -27,6 +27,8 @@ services:
       OPENAI_TIMEOUT_MS: ${OPENAI_TIMEOUT_MS:-120000}
       PORT: 3333
       PUBLIC_BASE_URL: http://localhost:3333
+      GENERATED_FILES_DIR: /app/backend/generated
+      UPLOAD_FILES_DIR: /app/backend/uploads
       FRONTEND_ORIGIN: http://localhost:5173
       JWT_SECRET: ${JWT_SECRET:-}
       JWT_EXPIRES_IN_SECONDS: ${JWT_EXPIRES_IN_SECONDS:-28800}

@@ -1,4 +1,5 @@
 import dotenv from "dotenv";
+import path from "node:path";
 
 dotenv.config();
 dotenv.config({ path: "backend/.env", override: false });
@@ -21,6 +22,8 @@ export const config = {
   port: Number(process.env.PORT ?? process.env.APP_PORT ?? process.env.SERVER_PORT ?? 3333),
   databaseUrl: process.env.DATABASE_URL ?? "postgresql://postgres:senha@localhost:5432/criativopro",
   publicBaseUrl: process.env.PUBLIC_BASE_URL ?? "http://localhost:3333",
+  generatedFilesDir: path.resolve(process.env.GENERATED_FILES_DIR?.trim() || "generated"),
+  uploadFilesDir: path.resolve(process.env.UPLOAD_FILES_DIR?.trim() || "uploads"),
   frontendOrigin: frontendOrigins[0],
   frontendOrigins,
   openaiApiKey: process.env.OPENAI_API_KEY,

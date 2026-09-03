@@ -293,6 +293,7 @@ export interface CampaignRecord {
   creative_json: string;
   image_path: string | null;
   image_url: string | null;
+  generated_image_url?: string | null;
   status: string;
   error_message: string | null;
   created_at: string;

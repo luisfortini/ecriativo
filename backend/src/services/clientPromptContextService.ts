@@ -5,6 +5,7 @@ const LIMITS = {
   brandMemorySummary: 1500,
   campaignSummary: 500,
   recentCampaigns: 3,
+  recentReviews: 8,
   approvedReferences: 5,
   rejectedReferences: 5,
   field: 900,
@@ -20,6 +21,7 @@ export async function buildClientPromptContext(clientId: number): Promise<Client
 
   const assets = await all<ClientAsset>("SELECT * FROM client_assets WHERE client_id = ? ORDER BY created_at DESC", [clientId]);
   const latestAnalysis = await latestBrandAnalysisSummary(clientId);
+  const recentReviews = await recentCreativeReviews(clientId);
 
   return compactObject({
     nome: text(client.name),
@@ -36,7 +38,7 @@ export async function buildClientPromptContext(clientId: number): Promise<Client
     ctas_preferidos: truncate(text(client.preferred_ctas || latestAnalysis.common_ctas), LIMITS.shortField),
     restricoes_comunicacao: truncate(text(client.communication_restrictions), LIMITS.field),
     resumo_memoria_marca: truncate(text(client.brand_memory_summary || latestAnalysis.strategic_notes || client.strategic_notes), LIMITS.brandMemorySummary),
-    aprendizados_recentes: truncate(buildRecentLearnings(client, assets), LIMITS.brandMemorySummary),
+    aprendizados_recentes: truncate(buildRecentLearnings(client, assets, recentReviews), LIMITS.brandMemorySummary),
     ultimas_campanhas_resumidas: await recentCampaigns(clientId),
     referencias_aprovadas_resumidas: summarizeReferences(assets.filter((asset) => approvedTypes.has(asset.type)), LIMITS.approvedReferences),
     referencias_reprovadas_resumidas: summarizeReferences(assets.filter((asset) => rejectedTypes.has(asset.type)), LIMITS.rejectedReferences)
@@ -94,9 +96,10 @@ function parseAnalysis(value: string | null) {
   }
 }
 
-function buildRecentLearnings(client: Record<string, string | number | null>, assets: ClientAsset[]) {
+function buildRecentLearnings(client: Record<string, string | number | null>, assets: ClientAsset[], reviews: string[]) {
   return [
     text(client.strategic_notes),
+    ...reviews,
     ...assets
       .map((asset) => asset.ai_summary || asset.user_feedback || asset.description || "")
       .filter(Boolean)
@@ -104,6 +107,26 @@ function buildRecentLearnings(client: Record<string, string | number | null>, as
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+async function recentCreativeReviews(clientId: number) {
+  const rows = await all<{ decision: "approved" | "rejected"; reason: string | null; visual_summary: string | null }>(
+    `SELECT r.decision, r.reason,
+            COALESCE(
+              c.creative_output_json::jsonb ->> 'visualDirectionSummary',
+              c.creative_json::jsonb ->> 'direcao_visual_resumida'
+            ) visual_summary
+     FROM campaign_reviews r
+     JOIN campaigns c ON c.id = r.campaign_id
+     WHERE r.client_id = ? AND r.reason IS NOT NULL AND length(trim(r.reason)) > 0
+     ORDER BY r.created_at DESC, r.id DESC
+     LIMIT ?`,
+    [clientId, LIMITS.recentReviews]
+  );
+  return rows.map((row) => {
+    const decision = row.decision === "approved" ? "Aprovado" : "Reprovado";
+    return `${decision}: ${row.reason}${row.visual_summary ? ` | Direção visual: ${row.visual_summary}` : ""}`;
+  });
 }
 
 async function recentCampaigns(clientId: number) {

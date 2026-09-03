@@ -1118,6 +1118,12 @@ Quando o overlay é aplicado, `final_image_url` aponta para um novo PNG.
 
 Quando o overlay não é aplicado, `final_image_url` recebe `image_url`.
 
+Os arquivos de imagem e uploads são gravados nos diretórios definidos por
+`GENERATED_FILES_DIR` e `UPLOAD_FILES_DIR`. Em produção, esses caminhos devem
+apontar para volumes persistentes. O banco armazena a URL e os metadados, mas
+não contém os bytes da imagem; portanto, uma URL válida não recupera um arquivo
+perdido em um volume efêmero.
+
 ## 5.5 Logs de execução dos agentes
 
 Cada execução registra:
@@ -1157,6 +1163,11 @@ O sistema associa consumo a:
 - modelo.
 
 O Brand Overlay não é uma chamada de IA e não gera custo de tokens.
+
+O preço é resolvido por correspondência exata do nome do modelo e precisa estar
+ativo. Cada registro salva um snapshot do preço aplicado e informa quando não
+houve correspondência. O painel exibe modelos sem preço, inativos ou zerados e
+permite simular e aplicar o recálculo do histórico com a tabela ativa atual.
 
 ## 5.7 Versões de agentes
 
@@ -1202,6 +1213,14 @@ A tabela `users` armazena:
 A senha original nunca é persistida nem devolvida pela API. O login retorna um JWT com prazo de expiração. Em cada rota privada, o backend valida assinatura, emissor, audiência, algoritmo, expiração e existência de um usuário ativo.
 
 O logout atual é stateless: o frontend solicita o encerramento e remove o token local. Não existe blacklist de tokens nesta primeira versão.
+
+## 5.10 Avaliações de criativos
+
+`campaign_reviews` mantém uma trilha independente do estado operacional da
+campanha. Cada avaliação registra campanha, cliente, usuário, decisão, motivo,
+marcadores e data. O motivo é obrigatório para reprovação e opcional para
+aprovação. Avaliações com motivo entram no contexto de aprendizados recentes do
+cliente nas gerações seguintes.
 
 ---
 
@@ -1265,6 +1284,10 @@ A interface permite salvar como memória:
 - feedback negativo.
 
 Esses aprendizados são anexados aos campos textuais do cliente.
+
+Motivos informados ao aprovar ou reprovar uma arte ficam na trilha de avaliações
+e são reutilizados no contexto consolidado, sem sobrescrever automaticamente os
+campos permanentes do perfil.
 
 ## 6.4 Memória consolidada
 
@@ -2072,15 +2095,16 @@ Não existe:
 
 ## 12.4 Revisão humana
 
-Existe marcação posterior de campanha como aprovada ou reprovada e existe `approval_mode` no planejador.
+Existe marcação posterior de campanha como aprovada ou reprovada, com motivo
+obrigatório na reprovação, histórico de avaliações e identificação do revisor.
+Também existe `approval_mode` no planejador.
 
 Não existe:
 
 - pausa obrigatória entre Estrategista e Criativo;
 - edição humana do Creative Brief antes da próxima etapa;
 - aprovação humana obrigatória antes da imagem;
-- workflow de comentários;
-- trilha de revisores;
+- workflow de discussão com respostas e resolução de comentários;
 - aprovação formal do Profile Diagnostic antes de torná-lo ativo.
 
 ## 12.5 Reexecução por etapa

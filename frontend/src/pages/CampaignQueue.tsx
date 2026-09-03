@@ -6,6 +6,7 @@ import { LoadingBlock } from "../components/LoadingBlock";
 import { PageHeader } from "../components/PageHeader";
 import { getCampaignQueue, notifyQueueError, reprocessQueueItem } from "../services/api";
 import type { CampaignQueueItem } from "../types";
+import { uiLabel } from "../utils/uiLabels";
 
 export function CampaignQueue() {
   const [params] = useSearchParams();
@@ -26,7 +27,7 @@ export function CampaignQueue() {
   }
 
   async function notifyError(item: CampaignQueueItem) {
-    await notifyQueueError(item.id, item.error_message || "Notificacao manual de erro da fila.");
+    await notifyQueueError(item.id, item.error_message || "Notificação manual de erro da fila.");
   }
 
   async function reprocessAndNotify(item: CampaignQueueItem) {
@@ -37,7 +38,7 @@ export function CampaignQueue() {
 
   return (
     <>
-      <PageHeader title="Fila de Geracao" description="Itens agendados e processados pelo worker backend." />
+      <PageHeader title="Fila de Geração" description="Itens agendados e processados pelo serviço de fila." />
       {error && <ErrorBanner message={error} />}
       {loading ? <LoadingBlock /> : (
         <div className="panel overflow-hidden">
@@ -45,11 +46,11 @@ export function CampaignQueue() {
             <div key={item.id} className="grid gap-3 border-b border-slate-100 p-4 last:border-b-0 lg:grid-cols-[1fr_180px_120px_120px]">
               <div>
                 <p className="font-semibold text-ink">{item.client_name}</p>
-                <p className="text-sm text-slate-500">{item.theme} · {item.variation_type || "variacao"}</p>
+                <p className="text-sm text-slate-500">{item.theme} · {uiLabel(item.variation_type, "Variação")}</p>
                 {item.error_message && <p className="mt-1 text-sm text-red-600">{item.error_message}</p>}
               </div>
               <p className="text-sm text-slate-600">{new Date(item.scheduled_at).toLocaleString("pt-BR")}</p>
-              <p className="text-sm text-slate-600">{item.status}<br />{item.attempt_count}/{item.max_attempts}</p>
+              <p className="text-sm text-slate-600">{uiLabel(item.status)}<br />{item.attempt_count}/{item.max_attempts}</p>
               <div className="flex flex-wrap gap-2">
                 {item.generated_campaign_id && <Link className="rounded-md border border-slate-300 px-3 py-2 text-xs" to={`/campanhas/${item.generated_campaign_id}`}>Campanha</Link>}
                 {item.status === "failed" && (

@@ -36,6 +36,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
                 <Route path="/agentes" element={<AgentCenter />} />
                 <Route path="/planejador" element={<CampaignPlanner />} />
                 <Route path="/planejador/novo" element={<NewCampaignPlan />} />
+                <Route path="/planejador/:id/editar" element={<NewCampaignPlan />} />
                 <Route path="/planejador/:id" element={<CampaignPlanDetail />} />
                 <Route path="/fila-geracao" element={<CampaignQueue />} />
                 <Route path="/execucoes-planejador" element={<CampaignPlannerLogs />} />

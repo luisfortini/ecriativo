@@ -1,6 +1,5 @@
 import cors from "cors";
 import express from "express";
-import path from "node:path";
 import { config, validateAuthConfig } from "./config.js";
 import { databaseHealth, pool } from "./db/connection.js";
 import { migrate } from "./db/migrate.js";
@@ -26,8 +25,8 @@ app.use(cors({
   }
 }));
 app.use(express.json({ limit: "2mb" }));
-app.use("/generated", express.static(path.resolve("generated")));
-app.use("/uploads", express.static(path.resolve("uploads")));
+app.use("/generated", express.static(config.generatedFilesDir));
+app.use("/uploads", express.static(config.uploadFilesDir));
 
 app.get("/", (_req, res) => {
   res.json({

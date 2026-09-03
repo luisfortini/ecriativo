@@ -1,13 +1,14 @@
-import { Ban, Check, Eye, LoaderCircle, Pause, Play, RotateCcw, Zap } from "lucide-react";
+import { Ban, Check, Copy, Eye, LoaderCircle, Pause, Pencil, Play, RotateCcw, Zap } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { LoadingBlock } from "../components/LoadingBlock";
 import { PageHeader } from "../components/PageHeader";
 import { campaignPlanAction, getCampaignPlan } from "../services/api";
 import type { CampaignPlan } from "../types";
+import { uiLabel } from "../utils/uiLabels";
 
-type PlanActionName = "activate" | "pause" | "resume" | "cancel-pending" | "retry-failures" | "generate-now";
+type PlanActionName = "activate" | "pause" | "resume" | "cancel-pending" | "retry-failures" | "generate-now" | "duplicate";
 
 const actionFeedback: Record<PlanActionName, { pending: string; completed: string; message: string }> = {
   activate: { pending: "Ativando...", completed: "Ativado", message: "Planejamento ativado e fila preparada." },
@@ -15,11 +16,13 @@ const actionFeedback: Record<PlanActionName, { pending: string; completed: strin
   resume: { pending: "Retomando...", completed: "Retomado", message: "Planejamento retomado." },
   "cancel-pending": { pending: "Cancelando...", completed: "Cancelados", message: "Itens pendentes cancelados." },
   "retry-failures": { pending: "Reprocessando...", completed: "Reenfileiradas", message: "Falhas reenfileiradas para uma nova tentativa." },
-  "generate-now": { pending: "Liberando...", completed: "Liberado", message: "Itens pendentes liberados para execucao agora." }
+  "generate-now": { pending: "Liberando...", completed: "Liberado", message: "Itens pendentes liberados para execução agora." },
+  duplicate: { pending: "Duplicando...", completed: "Duplicado", message: "Cópia criada como rascunho." }
 };
 
 export function CampaignPlanDetail() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const [plan, setPlan] = useState<CampaignPlan | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -45,8 +48,34 @@ export function CampaignPlanDetail() {
       setCompletedAction(name);
       setMessage(actionFeedback[name].message);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Nao foi possivel executar a acao.");
+      setError(err instanceof Error ? err.message : "Não foi possível executar a ação.");
     } finally {
+      setPendingAction(null);
+    }
+  }
+
+  async function duplicate() {
+    if (!plan) return;
+    setPendingAction("duplicate");
+    setError("");
+    try {
+      const copy = await campaignPlanAction(plan.id, "duplicate");
+      navigate(`/planejador/${copy.id}/editar`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível duplicar o planejamento.");
+      setPendingAction(null);
+    }
+  }
+
+  async function pauseAndEdit() {
+    if (!plan) return;
+    setPendingAction("pause");
+    setError("");
+    try {
+      await campaignPlanAction(plan.id, "pause");
+      navigate(`/planejador/${plan.id}/editar`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Não foi possível pausar o planejamento.");
       setPendingAction(null);
     }
   }
@@ -57,8 +86,15 @@ export function CampaignPlanDetail() {
 
   return (
     <>
-      <PageHeader title={plan.name} description={`${plan.theme} · ${plan.status} · ${plan.start_date} ate ${plan.end_date}`} />
+      <PageHeader title={plan.name} description={`${plan.theme} · ${uiLabel(plan.status)} · ${plan.start_date} até ${plan.end_date}`} />
       <div className="mb-5 flex flex-wrap gap-2">
+        {(plan.status === "draft" || plan.status === "paused") && (
+          <Link className="inline-flex items-center gap-2 rounded-md bg-brand px-3 py-2 text-sm font-semibold text-white" to={`/planejador/${plan.id}/editar`}><Pencil size={15} />Editar planejamento</Link>
+        )}
+        {plan.status === "active" && (
+          <button className="inline-flex items-center gap-2 rounded-md bg-brand px-3 py-2 text-sm font-semibold text-white disabled:opacity-60" type="button" disabled={pendingAction !== null} onClick={() => void pauseAndEdit()}><Pause size={15} />{pendingAction === "pause" ? "Pausando..." : "Pausar e editar"}</button>
+        )}
+        <button className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 disabled:opacity-60" type="button" disabled={pendingAction !== null} onClick={() => void duplicate()}><Copy size={15} />{pendingAction === "duplicate" ? "Duplicando..." : "Duplicar"}</button>
         <Action icon={<Play size={15} />} label="Ativar" action="activate" pendingAction={pendingAction} completedAction={completedAction} onClick={() => action("activate")} />
         <Action icon={<Pause size={15} />} label="Pausar planejamento" action="pause" pendingAction={pendingAction} completedAction={completedAction} onClick={() => action("pause")} />
         <Action icon={<Play size={15} />} label="Retomar planejamento" action="resume" pendingAction={pendingAction} completedAction={completedAction} onClick={() => action("resume")} />
@@ -79,9 +115,9 @@ export function CampaignPlanDetail() {
             <div className="grid gap-3 md:grid-cols-3">
               <Info label="Objetivo" value={plan.objective} />
               <Info label="Formato" value={plan.ad_format} />
-              <Info label="Recorrencia" value={plan.recurrence_type} />
-              <Info label="Aprovacao" value={plan.approval_mode} />
-              <Info label="Limite diario" value={String(plan.max_ads_per_day)} />
+              <Info label="Recorrência" value={uiLabel(plan.recurrence_type)} />
+              <Info label="Aprovação" value={uiLabel(plan.approval_mode)} />
+              <Info label="Limite diário" value={String(plan.max_ads_per_day)} />
               <Info label="Intervalo" value={`${plan.min_interval_minutes} min`} />
             </div>
           </div>
@@ -93,7 +129,7 @@ export function CampaignPlanDetail() {
                   <p className="font-semibold text-ink">{item.client_name}</p>
                   <p className="text-sm text-slate-500">{new Date(item.scheduled_at).toLocaleString("pt-BR")} · {item.variation_type}</p>
                 </div>
-                <span className="rounded bg-slate-100 px-2 py-1 text-xs text-slate-700">{item.status}</span>
+                <span className="rounded bg-slate-100 px-2 py-1 text-xs text-slate-700">{uiLabel(item.status)}</span>
               </div>
             ))}
           </div>
@@ -102,10 +138,10 @@ export function CampaignPlanDetail() {
           <div className="panel p-5">
             <h2 className="mb-3 font-bold text-ink">Clientes</h2>
             <div className="space-y-2">
-              {plan.clients?.map((client) => <p key={client.id} className="rounded-md border border-slate-200 p-3 text-sm"><strong>{client.name}</strong><br />{client.ads_quantity} anuncios</p>)}
+              {plan.clients?.map((client) => <p key={client.id} className="rounded-md border border-slate-200 p-3 text-sm"><strong>{client.name}</strong><br />{client.ads_quantity} anúncios</p>)}
             </div>
           </div>
-          <Link className="block rounded-md bg-brand px-4 py-3 text-center text-sm font-semibold text-white" to="/execucoes-planejador">Visualizar historico de execucoes</Link>
+          <Link className="block rounded-md bg-brand px-4 py-3 text-center text-sm font-semibold text-white" to="/execucoes-planejador">Visualizar histórico de execuções</Link>
         </aside>
       </div>
     </>
