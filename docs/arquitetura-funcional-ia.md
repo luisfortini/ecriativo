@@ -2229,6 +2229,14 @@ Não existe:
 - o banco atual pode conter assets antigos de logo que não atendem à validação nova;
 - não existe recuperação de senha, 2FA, login social, convite de usuários, gestão avançada de permissões ou revogação centralizada de tokens.
 
+## 12.13 Isolamento SaaS multiempresa
+
+O contexto autenticado contém a organização ativa e o papel do membro (`owner`, `admin` ou `member`). Cada requisição protegida abre uma transação, configura `app.organization_id` no PostgreSQL e executa as consultas sob políticas de Row-Level Security forçadas.
+
+As tabelas de negócio possuem `organization_id` obrigatório. Relacionamentos críticos também usam chaves estrangeiras compostas com a organização, impedindo referências acidentais entre empresas. O worker percorre organizações ativas e processa cada fila dentro do respectivo contexto.
+
+Arquivos em `/generated` e `/uploads` não são mais publicados como diretórios estáticos: o backend autentica a requisição e confirma que a campanha ou o material pertence à organização ativa antes da entrega.
+
 ---
 
 # Apêndice A — Resumo das entradas e saídas oficiais

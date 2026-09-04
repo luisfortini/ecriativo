@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { getCurrentUser, loginRequest, logoutRequest } from "../services/api";
+import { getCurrentUser, loginRequest, logoutRequest, switchOrganizationRequest } from "../services/api";
 import type { AuthUser } from "../types";
 import { clearAuthToken, getAuthToken, setAuthToken } from "./authStorage";
 
@@ -8,6 +8,7 @@ interface AuthContextValue {
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  switchOrganization: (organizationId: number) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -67,6 +68,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         clearAuthToken();
         setUser(null);
       }
+    },
+    async switchOrganization(organizationId) {
+      const response = await switchOrganizationRequest(organizationId);
+      setAuthToken(response.token);
+      setUser(response.user);
     }
   }), [loading, user]);
 

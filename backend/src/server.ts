@@ -4,16 +4,20 @@ import { config, validateAuthConfig } from "./config.js";
 import { databaseHealth, pool } from "./db/connection.js";
 import { migrate } from "./db/migrate.js";
 import { requireAuth } from "./middleware/authMiddleware.js";
+import { requireOrganization } from "./middleware/organizationMiddleware.js";
 import { authRoutes } from "./routes/authRoutes.js";
 import { campaignRoutes } from "./routes/campaignRoutes.js";
 import { startQueueWorker } from "./services/queueWorker.js";
 import { errorHandler } from "./utils/errors.js";
+import { asyncHandler } from "./utils/asyncHandler.js";
+import { generatedMediaController, uploadedMediaController } from "./controllers/mediaController.js";
 
 const app = express();
 
 const allowedOrigins = new Set(config.frontendOrigins);
 
 app.use(cors({
+  credentials: true,
   origin(origin, callback) {
     if (!origin) {
       callback(null, true);
@@ -25,8 +29,8 @@ app.use(cors({
   }
 }));
 app.use(express.json({ limit: "2mb" }));
-app.use("/generated", express.static(config.generatedFilesDir));
-app.use("/uploads", express.static(config.uploadFilesDir));
+app.get("/generated/:filename", requireAuth, requireOrganization, asyncHandler(generatedMediaController));
+app.get("/uploads/:filename", requireAuth, requireOrganization, asyncHandler(uploadedMediaController));
 
 app.get("/", (_req, res) => {
   res.json({
@@ -58,7 +62,7 @@ app.get("/health/database", async (_req, res, next) => {
 });
 
 app.use("/api/auth", authRoutes);
-app.use("/api", requireAuth, campaignRoutes);
+app.use("/api", requireAuth, requireOrganization, campaignRoutes);
 app.use(errorHandler);
 
 async function bootstrap() {

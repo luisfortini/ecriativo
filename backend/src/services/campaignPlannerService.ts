@@ -1,6 +1,6 @@
 import type { PoolClient } from "pg";
 import { config } from "../config.js";
-import { all, get, run, transaction } from "../db/connection.js";
+import { all, get, run, transaction, withOrganizationContext } from "../db/connection.js";
 import { AppError } from "../utils/errors.js";
 import { calendarDayDifference, zonedDateKey, zonedDateTime, zonedHourKey, zonedWeekday } from "../utils/zonedDateTime.js";
 import type { CampaignFormat } from "../types.js";
@@ -281,6 +281,13 @@ export async function listGenerationLogs(filters?: { planId?: number }) {
 }
 
 export async function processDueQueue() {
+  const organizations = await all<{ id: number }>("SELECT id FROM organizations WHERE status = 'active' ORDER BY id");
+  for (const organization of organizations) {
+    await withOrganizationContext(Number(organization.id), processDueQueueForCurrentOrganization);
+  }
+}
+
+async function processDueQueueForCurrentOrganization() {
   const settings = await getSettings();
   if (settings.queue_worker_enabled !== "true") return;
   await recoverStaleProcessingItems();

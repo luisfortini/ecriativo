@@ -1,4 +1,4 @@
-import { Bot, CalendarClock, Clock3, DollarSign, LayoutDashboard, LogOut, MessageCircle, Plus, Users } from "lucide-react";
+import { Bot, Building2, CalendarClock, Clock3, DollarSign, LayoutDashboard, LogOut, MessageCircle, Plus, Users } from "lucide-react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 
@@ -10,11 +10,12 @@ const navItems = [
   { to: "/whatsapp", label: "WhatsApp", icon: MessageCircle },
   { to: "/planejador", label: "Planejador", icon: CalendarClock },
   { to: "/nova-campanha", label: "Nova campanha", icon: Plus },
-  { to: "/historico", label: "Histórico", icon: Clock3 }
+  { to: "/historico", label: "Histórico", icon: Clock3 },
+  { to: "/empresa", label: "Empresa e equipe", icon: Building2 }
 ];
 
 export function AppShell() {
-  const { user, logout } = useAuth();
+  const { user, logout, switchOrganization } = useAuth();
   const navigate = useNavigate();
 
   async function signOut() {
@@ -52,6 +53,19 @@ export function AppShell() {
         </nav>
 
         <div className="border-t border-slate-200 pt-4">
+          <label className="mb-1 block text-xs font-medium text-slate-500" htmlFor="organization-switcher">
+            Empresa
+          </label>
+          <select
+            id="organization-switcher"
+            className="mb-3 w-full rounded-md border border-slate-200 bg-white px-2 py-2 text-sm text-ink"
+            value={user?.organization.id ?? ""}
+            onChange={(event) => void switchOrganization(Number(event.target.value)).then(() => navigate("/", { replace: true }))}
+          >
+            {user?.organizations.map((organization) => (
+              <option key={organization.id} value={organization.id}>{organization.name}</option>
+            ))}
+          </select>
           <p className="truncate text-sm font-semibold text-ink">{user?.name}</p>
           <p className="truncate text-xs text-slate-500">{user?.email}</p>
           <button

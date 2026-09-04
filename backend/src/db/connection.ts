@@ -1,5 +1,6 @@
 import { Pool, PoolClient, QueryResult, QueryResultRow } from "pg";
 import { config } from "../config.js";
+import { getDatabaseRequestContext, runWithDatabaseRequestContext } from "./requestContext.js";
 
 export const pool = new Pool({
   connectionString: config.databaseUrl,
@@ -19,7 +20,7 @@ export function toPostgresBoolean(value: unknown) {
 
 export async function query<T extends QueryResultRow = Record<string, unknown>>(sql: string, params?: QueryParams, client?: PoolClient) {
   const prepared = prepareSql(sql, params);
-  const executor = client ?? pool;
+  const executor = client ?? getDatabaseRequestContext()?.client ?? pool;
   return executor.query(prepared.sql, prepared.values) as Promise<QueryResult<T>>;
 }
 
@@ -45,6 +46,19 @@ export async function exec(sql: string, client?: PoolClient) {
 }
 
 export async function transaction<T>(callback: (client: PoolClient) => Promise<T>) {
+  const contextualClient = getDatabaseRequestContext()?.client;
+  if (contextualClient) {
+    const savepoint = `nested_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    await contextualClient.query(`SAVEPOINT ${savepoint}`);
+    try {
+      const result = await callback(contextualClient);
+      await contextualClient.query(`RELEASE SAVEPOINT ${savepoint}`);
+      return result;
+    } catch (error) {
+      await contextualClient.query(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+      throw error;
+    }
+  }
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -56,6 +70,33 @@ export async function transaction<T>(callback: (client: PoolClient) => Promise<T
     throw error;
   } finally {
     client.release();
+  }
+}
+
+export async function withOrganizationContext<T>(organizationId: number, callback: () => Promise<T>, userId?: number) {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT set_config('app.organization_id', $1, true)", [String(organizationId)]);
+    await assumeTenantRole(client);
+    const result = await runWithDatabaseRequestContext({ client, organizationId, userId }, callback);
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function assumeTenantRole(client: PoolClient) {
+  const result = await client.query<{ elevated: boolean }>(
+    `SELECT (r.rolsuper OR r.rolbypassrls) elevated
+       FROM pg_roles r WHERE r.rolname = current_user`
+  );
+  if (result.rows[0]?.elevated) {
+    await client.query('SET LOCAL ROLE "ecriativo_tenant"');
   }
 }
 

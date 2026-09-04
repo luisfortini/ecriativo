@@ -36,6 +36,11 @@ async function main() {
     ]);
     applicationPool = db.pool;
     await migrate();
+    const primaryOrganization = await db.get<{ id: number }>("SELECT id FROM organizations ORDER BY id LIMIT 1");
+    assert(primaryOrganization, "A migracao deveria criar a organizacao inicial.");
+    let primaryClientId = 0;
+
+    await db.withOrganizationContext(Number(primaryOrganization.id), async () => {
 
     const timezonePlan: PlannerPlan = {
       id: 999,
@@ -79,6 +84,7 @@ async function main() {
 
     const clientInsert = await db.run("INSERT INTO clients (name, segment) VALUES (?, ?)", ["Cliente Smoke", "Testes"]);
     const clientId = Number(clientInsert.lastInsertRowid);
+    primaryClientId = clientId;
     const userInsert = await db.run(
       "INSERT INTO users (name, email, password_hash, role, active) VALUES (?, ?, ?, 'admin', TRUE)",
       ["Revisor Smoke", "smoke@example.test", "hash-de-teste"]
@@ -162,7 +168,27 @@ async function main() {
       `A navegação entre criativos não encontrou o item seguinte da lista: ${JSON.stringify({ firstCampaign, secondCampaign, navigation })}`
     );
 
-    console.log(JSON.stringify({ status: "ok", checks: ["fuso", "paleta", "custos", "planejador", "duplicação", "avaliações", "aprendizado", "navegação"] }));
+    });
+
+    const secondOrganization = await db.run("INSERT INTO organizations (name, slug) VALUES (?, ?)", ["Empresa isolada", `empresa-isolada-${Date.now()}`]);
+    await db.withOrganizationContext(Number(secondOrganization.lastInsertRowid), async () => {
+      const visibleClients = await db.all("SELECT id FROM clients");
+      assert(visibleClients.length === 0, "Uma nova empresa nao pode enxergar clientes da empresa inicial.");
+      let crossTenantReferenceBlocked = false;
+      try {
+        await db.run("INSERT INTO client_assets (client_id, type, file_url) VALUES (?, 'reference_image', ?)", [primaryClientId, "https://example.test/vazamento.png"]);
+      } catch {
+        crossTenantReferenceBlocked = true;
+      }
+      assert(crossTenantReferenceBlocked, "Uma referencia para cliente de outra empresa deveria ser bloqueada.");
+      await db.run("INSERT INTO clients (name, segment) VALUES (?, ?)", ["Cliente Smoke", "Outro tenant"]);
+    });
+    await db.withOrganizationContext(Number(primaryOrganization.id), async () => {
+      const visibleClients = await db.all("SELECT id FROM clients WHERE name = ?", ["Cliente Smoke"]);
+      assert(visibleClients.length === 1, "Dados da segunda empresa vazaram para a empresa inicial.");
+    });
+
+    console.log(JSON.stringify({ status: "ok", checks: ["fuso", "paleta", "custos", "planejador", "duplicação", "avaliações", "aprendizado", "navegação", "isolamento multiempresa"] }));
   } finally {
     if (applicationPool) await applicationPool.end();
     await adminPool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);

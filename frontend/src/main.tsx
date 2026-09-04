@@ -20,6 +20,7 @@ import { NewCampaignPlan } from "./pages/NewCampaignPlan";
 import { Dashboard } from "./pages/Dashboard";
 import { NewCampaign } from "./pages/NewCampaign";
 import { Login } from "./pages/Login";
+import { OrganizationSettings } from "./pages/OrganizationSettings";
 import "./styles.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
@@ -46,6 +47,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
                 <Route path="/nova-campanha" element={<NewCampaign />} />
                 <Route path="/campanhas/:id" element={<CampaignResult />} />
                 <Route path="/historico" element={<CampaignHistory />} />
+                <Route path="/empresa" element={<OrganizationSettings />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Route>
             </Route>

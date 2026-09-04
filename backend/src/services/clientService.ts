@@ -3,6 +3,8 @@ import path from "node:path";
 import { config } from "../config.js";
 import { all, get, run, transaction } from "../db/connection.js";
 import type { ClientAsset, ClientAssetType, ClientBrandAnalysis, ClientProfile } from "../types.js";
+import { getDatabaseRequestContext } from "../db/requestContext.js";
+import { AppError } from "../utils/errors.js";
 
 const clientFields = [
   "name",
@@ -66,6 +68,16 @@ export async function getClient(id: number) {
 export async function createClient(payload: ClientPayload) {
   const name = payload.name?.trim();
   if (!name) throw new Error("Informe o nome do cliente.");
+  const organizationId = getDatabaseRequestContext()?.organizationId;
+  if (!organizationId) throw new AppError("Organizacao nao selecionada.", 403);
+  const quota = await get<{ max_clients: number; total: number }>(
+    `SELECT o.max_clients, (SELECT COUNT(*)::int FROM clients) total
+       FROM organizations o WHERE o.id = ?`,
+    [organizationId]
+  );
+  if (quota && Number(quota.total) >= Number(quota.max_clients)) {
+    throw new AppError(`O plano atual permite ate ${quota.max_clients} clientes.`, 409);
+  }
 
   const result = await run(
     `INSERT INTO clients (

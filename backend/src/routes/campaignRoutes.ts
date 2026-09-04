@@ -65,6 +65,7 @@ import {
   updateWhatsappSettingsController
 } from "../controllers/whatsappController.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
+import { addOrganizationMemberController, listOrganizationMembersController } from "../controllers/organizationController.js";
 
 const uploadDir = config.uploadFilesDir;
 fs.mkdirSync(uploadDir, { recursive: true });
@@ -75,6 +76,9 @@ const upload = multer({
 });
 
 export const campaignRoutes = Router();
+
+campaignRoutes.get("/organization/members", asyncHandler(listOrganizationMembersController));
+campaignRoutes.post("/organization/members", asyncHandler(addOrganizationMemberController));
 
 campaignRoutes.get("/campaigns", asyncHandler(listCampaignsController));
 campaignRoutes.post("/campaigns", upload.single("referencia_arquivo"), asyncHandler(createCampaignController));

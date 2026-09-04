@@ -4,7 +4,7 @@ import {
   ProfileDiagnosticSchema
 } from "../contracts/index.js";
 import bcrypt from "bcryptjs";
-import { all, exec, get, run } from "./connection.js";
+import { all, exec, get, run, withOrganizationContext } from "./connection.js";
 
 interface Migration {
   id: string;
@@ -604,6 +604,238 @@ const migrations: Migration[] = [
       ALTER TABLE campaigns
         ALTER COLUMN creative_status SET DEFAULT 'waiting_review';
     `
+  },
+  {
+    id: "010_saas_multi_organization",
+    up: `
+      CREATE TABLE IF NOT EXISTS organizations (
+        id BIGSERIAL PRIMARY KEY,
+        name TEXT NOT NULL CHECK (length(trim(name)) >= 2),
+        slug TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'cancelled')),
+        plan_code TEXT NOT NULL DEFAULT 'trial',
+        billing_status TEXT NOT NULL DEFAULT 'trialing' CHECK (billing_status IN ('trialing', 'active', 'past_due', 'cancelled')),
+        trial_ends_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP + INTERVAL '14 days',
+        max_members INTEGER NOT NULL DEFAULT 3 CHECK (max_members > 0),
+        max_clients INTEGER NOT NULL DEFAULT 10 CHECK (max_clients > 0),
+        monthly_ai_budget DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (monthly_ai_budget >= 0),
+        billing_customer_id TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_organizations_slug_unique
+        ON organizations(lower(slug));
+
+      CREATE TABLE IF NOT EXISTS organization_members (
+        id BIGSERIAL PRIMARY KEY,
+        organization_id BIGINT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+        user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        role TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('owner', 'admin', 'member')),
+        status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('invited', 'active', 'suspended')),
+        is_default BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(organization_id, user_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_organization_members_user
+        ON organization_members(user_id, status);
+
+      INSERT INTO organizations (name, slug)
+      SELECT 'Organizacao principal', 'principal'
+      WHERE NOT EXISTS (SELECT 1 FROM organizations);
+
+      INSERT INTO organization_members (organization_id, user_id, role, status, is_default)
+      SELECT o.id, u.id, CASE WHEN u.role = 'admin' THEN 'owner' ELSE 'member' END, 'active', TRUE
+      FROM organizations o
+      CROSS JOIN users u
+      WHERE o.id = (SELECT id FROM organizations ORDER BY id LIMIT 1)
+      ON CONFLICT (organization_id, user_id) DO NOTHING;
+
+      CREATE OR REPLACE FUNCTION app_current_organization_id()
+      RETURNS BIGINT
+      LANGUAGE SQL
+      STABLE
+      AS $$
+        SELECT NULLIF(current_setting('app.organization_id', true), '')::BIGINT
+      $$;
+
+      ALTER TABLE clients ADD COLUMN IF NOT EXISTS organization_id BIGINT REFERENCES organizations(id);
+      ALTER TABLE brands ADD COLUMN IF NOT EXISTS organization_id BIGINT REFERENCES organizations(id);
+      ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS organization_id BIGINT REFERENCES organizations(id);
+      ALTER TABLE client_assets ADD COLUMN IF NOT EXISTS organization_id BIGINT REFERENCES organizations(id);
+      ALTER TABLE client_brand_analysis ADD COLUMN IF NOT EXISTS organization_id BIGINT REFERENCES organizations(id);
+      ALTER TABLE agents ADD COLUMN IF NOT EXISTS organization_id BIGINT REFERENCES organizations(id);
+      ALTER TABLE agent_versions ADD COLUMN IF NOT EXISTS organization_id BIGINT REFERENCES organizations(id);
+      ALTER TABLE agent_execution_logs ADD COLUMN IF NOT EXISTS organization_id BIGINT REFERENCES organizations(id);
+      ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS organization_id BIGINT REFERENCES organizations(id);
+      ALTER TABLE campaign_plans ADD COLUMN IF NOT EXISTS organization_id BIGINT REFERENCES organizations(id);
+      ALTER TABLE campaign_plan_clients ADD COLUMN IF NOT EXISTS organization_id BIGINT REFERENCES organizations(id);
+      ALTER TABLE campaign_generation_queue ADD COLUMN IF NOT EXISTS organization_id BIGINT REFERENCES organizations(id);
+      ALTER TABLE campaign_generation_logs ADD COLUMN IF NOT EXISTS organization_id BIGINT REFERENCES organizations(id);
+      ALTER TABLE ai_model_prices ADD COLUMN IF NOT EXISTS organization_id BIGINT REFERENCES organizations(id);
+      ALTER TABLE ai_usage_logs ADD COLUMN IF NOT EXISTS organization_id BIGINT REFERENCES organizations(id);
+      ALTER TABLE notification_settings ADD COLUMN IF NOT EXISTS organization_id BIGINT REFERENCES organizations(id);
+      ALTER TABLE notification_logs ADD COLUMN IF NOT EXISTS organization_id BIGINT REFERENCES organizations(id);
+      ALTER TABLE client_profile_diagnostics ADD COLUMN IF NOT EXISTS organization_id BIGINT REFERENCES organizations(id);
+      ALTER TABLE campaign_pipeline_runs ADD COLUMN IF NOT EXISTS organization_id BIGINT REFERENCES organizations(id);
+      ALTER TABLE campaign_artifacts ADD COLUMN IF NOT EXISTS organization_id BIGINT REFERENCES organizations(id);
+      ALTER TABLE campaign_pipeline_events ADD COLUMN IF NOT EXISTS organization_id BIGINT REFERENCES organizations(id);
+      ALTER TABLE campaign_reviews ADD COLUMN IF NOT EXISTS organization_id BIGINT REFERENCES organizations(id);
+
+      DO $$
+      DECLARE tenant_id BIGINT;
+      DECLARE table_name TEXT;
+      BEGIN
+        SELECT id INTO tenant_id FROM organizations ORDER BY id LIMIT 1;
+        FOREACH table_name IN ARRAY ARRAY[
+          'clients','brands','campaigns','client_assets','client_brand_analysis','agents',
+          'agent_versions','agent_execution_logs','app_settings','campaign_plans',
+          'campaign_plan_clients','campaign_generation_queue','campaign_generation_logs',
+          'ai_model_prices','ai_usage_logs','notification_settings','notification_logs',
+          'client_profile_diagnostics','campaign_pipeline_runs','campaign_artifacts',
+          'campaign_pipeline_events','campaign_reviews'
+        ] LOOP
+          EXECUTE format('UPDATE %I SET organization_id = $1 WHERE organization_id IS NULL', table_name) USING tenant_id;
+          EXECUTE format('ALTER TABLE %I ALTER COLUMN organization_id SET DEFAULT app_current_organization_id()', table_name);
+          EXECUTE format('ALTER TABLE %I ALTER COLUMN organization_id SET NOT NULL', table_name);
+        END LOOP;
+      END $$;
+
+      ALTER TABLE clients DROP CONSTRAINT IF EXISTS clients_name_key;
+      ALTER TABLE agents DROP CONSTRAINT IF EXISTS agents_key_key;
+      ALTER TABLE ai_model_prices DROP CONSTRAINT IF EXISTS ai_model_prices_model_key;
+      ALTER TABLE app_settings DROP CONSTRAINT IF EXISTS app_settings_pkey;
+      ALTER TABLE notification_settings DROP CONSTRAINT IF EXISTS notification_settings_scope_type_scope_id_channel_key;
+      DROP INDEX IF EXISTS idx_notification_settings_global_channel;
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_org_name_unique
+        ON clients(organization_id, lower(name));
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_org_key_unique
+        ON agents(organization_id, key);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_model_prices_org_model_unique
+        ON ai_model_prices(organization_id, model);
+      ALTER TABLE app_settings ADD CONSTRAINT app_settings_pkey PRIMARY KEY (organization_id, key);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_notification_settings_org_global_channel
+        ON notification_settings(organization_id, scope_type, channel)
+        WHERE scope_id IS NULL;
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_notification_settings_org_scope_unique
+        ON notification_settings(organization_id, scope_type, scope_id, channel)
+        WHERE scope_id IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_clients_organization ON clients(organization_id);
+      CREATE INDEX IF NOT EXISTS idx_campaigns_organization ON campaigns(organization_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_campaign_plans_organization ON campaign_plans(organization_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_ai_usage_organization ON ai_usage_logs(organization_id, created_at DESC);
+
+      DO $$
+      DECLARE table_name TEXT;
+      BEGIN
+        FOREACH table_name IN ARRAY ARRAY[
+          'clients','brands','campaigns','client_assets','client_brand_analysis','agents',
+          'agent_versions','agent_execution_logs','app_settings','campaign_plans',
+          'campaign_plan_clients','campaign_generation_queue','campaign_generation_logs',
+          'ai_model_prices','ai_usage_logs','notification_settings','notification_logs',
+          'client_profile_diagnostics','campaign_pipeline_runs','campaign_artifacts',
+          'campaign_pipeline_events','campaign_reviews'
+        ] LOOP
+          EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', table_name);
+          EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', table_name);
+          EXECUTE format('DROP POLICY IF EXISTS organization_isolation ON %I', table_name);
+          EXECUTE format(
+            'CREATE POLICY organization_isolation ON %I USING (organization_id = app_current_organization_id()) WITH CHECK (organization_id = app_current_organization_id())',
+            table_name
+          );
+        END LOOP;
+      END $$;
+
+      DO $$
+      DECLARE schema_name TEXT := current_schema();
+      DECLARE can_manage_roles BOOLEAN;
+      BEGIN
+        SELECT (rolsuper OR rolcreaterole) INTO can_manage_roles FROM pg_roles WHERE rolname = current_user;
+        IF can_manage_roles THEN
+          IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ecriativo_tenant') THEN
+            CREATE ROLE ecriativo_tenant NOLOGIN NOSUPERUSER NOBYPASSRLS;
+          END IF;
+          EXECUTE format('GRANT USAGE ON SCHEMA %I TO ecriativo_tenant', schema_name);
+          EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA %I TO ecriativo_tenant', schema_name);
+          EXECUTE format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA %I TO ecriativo_tenant', schema_name);
+          EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA %I GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ecriativo_tenant', schema_name);
+          EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA %I GRANT USAGE, SELECT ON SEQUENCES TO ecriativo_tenant', schema_name);
+        END IF;
+      END $$;
+    `
+  },
+  {
+    id: "011_tenant_relationship_integrity",
+    up: `
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_clients_org_id ON clients(organization_id, id);
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_brands_org_id ON brands(organization_id, id);
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_campaigns_org_id ON campaigns(organization_id, id);
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_agents_org_id ON agents(organization_id, id);
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_agent_versions_org_id ON agent_versions(organization_id, id);
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_agent_logs_org_id ON agent_execution_logs(organization_id, id);
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_campaign_plans_org_id ON campaign_plans(organization_id, id);
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_campaign_queue_org_id ON campaign_generation_queue(organization_id, id);
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_profile_diagnostics_org_id ON client_profile_diagnostics(organization_id, id);
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_pipeline_runs_org_id ON campaign_pipeline_runs(organization_id, id);
+
+      DO $$
+      DECLARE spec TEXT[];
+      BEGIN
+        FOREACH spec SLICE 1 IN ARRAY ARRAY[
+          ARRAY['brands','brands_client_org_fk','client_id','clients'],
+          ARRAY['campaigns','campaigns_client_org_fk','client_id','clients'],
+          ARRAY['campaigns','campaigns_brand_org_fk','brand_id','brands'],
+          ARRAY['client_assets','client_assets_client_org_fk','client_id','clients'],
+          ARRAY['client_brand_analysis','client_analysis_client_org_fk','client_id','clients'],
+          ARRAY['agent_versions','agent_versions_agent_org_fk','agent_id','agents'],
+          ARRAY['agent_execution_logs','agent_logs_agent_org_fk','agent_id','agents'],
+          ARRAY['agent_execution_logs','agent_logs_campaign_org_fk','campaign_id','campaigns'],
+          ARRAY['agent_execution_logs','agent_logs_client_org_fk','client_id','clients'],
+          ARRAY['campaign_plan_clients','plan_clients_plan_org_fk','campaign_plan_id','campaign_plans'],
+          ARRAY['campaign_plan_clients','plan_clients_client_org_fk','client_id','clients'],
+          ARRAY['campaign_generation_queue','queue_plan_org_fk','campaign_plan_id','campaign_plans'],
+          ARRAY['campaign_generation_queue','queue_client_org_fk','client_id','clients'],
+          ARRAY['campaign_generation_queue','queue_campaign_org_fk','generated_campaign_id','campaigns'],
+          ARRAY['campaign_generation_logs','generation_logs_queue_org_fk','queue_id','campaign_generation_queue'],
+          ARRAY['campaign_generation_logs','generation_logs_plan_org_fk','campaign_plan_id','campaign_plans'],
+          ARRAY['campaign_generation_logs','generation_logs_client_org_fk','client_id','clients'],
+          ARRAY['ai_usage_logs','ai_usage_client_org_fk','client_id','clients'],
+          ARRAY['ai_usage_logs','ai_usage_campaign_org_fk','campaign_id','campaigns'],
+          ARRAY['ai_usage_logs','ai_usage_plan_org_fk','campaign_plan_id','campaign_plans'],
+          ARRAY['ai_usage_logs','ai_usage_queue_org_fk','queue_id','campaign_generation_queue'],
+          ARRAY['ai_usage_logs','ai_usage_agent_org_fk','agent_id','agents'],
+          ARRAY['notification_logs','notification_logs_client_org_fk','client_id','clients'],
+          ARRAY['notification_logs','notification_logs_campaign_org_fk','campaign_id','campaigns'],
+          ARRAY['notification_logs','notification_logs_plan_org_fk','campaign_plan_id','campaign_plans'],
+          ARRAY['notification_logs','notification_logs_queue_org_fk','queue_id','campaign_generation_queue'],
+          ARRAY['client_profile_diagnostics','profile_diagnostics_client_org_fk','client_id','clients'],
+          ARRAY['client_profile_diagnostics','profile_diagnostics_agent_org_fk','agent_id','agents'],
+          ARRAY['client_profile_diagnostics','profile_diagnostics_version_org_fk','agent_version_id','agent_versions'],
+          ARRAY['client_profile_diagnostics','profile_diagnostics_log_org_fk','execution_log_id','agent_execution_logs'],
+          ARRAY['campaign_pipeline_runs','pipeline_runs_campaign_org_fk','campaign_id','campaigns'],
+          ARRAY['campaign_pipeline_runs','pipeline_runs_client_org_fk','client_id','clients'],
+          ARRAY['campaign_pipeline_runs','pipeline_runs_profile_org_fk','profile_diagnostic_id','client_profile_diagnostics'],
+          ARRAY['campaign_artifacts','artifacts_run_org_fk','pipeline_run_id','campaign_pipeline_runs'],
+          ARRAY['campaign_artifacts','artifacts_agent_org_fk','agent_id','agents'],
+          ARRAY['campaign_artifacts','artifacts_version_org_fk','agent_version_id','agent_versions'],
+          ARRAY['campaign_artifacts','artifacts_log_org_fk','execution_log_id','agent_execution_logs'],
+          ARRAY['campaign_pipeline_events','pipeline_events_campaign_org_fk','campaign_id','campaigns'],
+          ARRAY['campaign_pipeline_events','pipeline_events_run_org_fk','pipeline_run_id','campaign_pipeline_runs'],
+          ARRAY['campaign_reviews','reviews_campaign_org_fk','campaign_id','campaigns'],
+          ARRAY['campaign_reviews','reviews_client_org_fk','client_id','clients']
+        ] LOOP
+          IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = spec[2]) THEN
+            EXECUTE format(
+              'ALTER TABLE %I ADD CONSTRAINT %I FOREIGN KEY (organization_id, %I) REFERENCES %I(organization_id, id)',
+              spec[1], spec[2], spec[3], spec[4]
+            );
+          END IF;
+        END LOOP;
+      END $$;
+    `
   }
 ];
 
@@ -616,12 +848,39 @@ export async function migrate() {
     await exec(migration.up);
     await run("INSERT INTO schema_migrations (id) VALUES (?)", [migration.id]);
   }
-  await seedAgents();
-  await seedAppSettings();
-  await seedAiModelPrices();
-  await seedNotificationSettings();
   await seedInitialAdmin();
-  await backfillAiUsageLogs();
+  await ensureOrganizationMemberships();
+  const organizations = await all<{ id: number }>("SELECT id FROM organizations WHERE status = 'active' ORDER BY id");
+  for (const organization of organizations) {
+    await seedOrganizationDefaults(Number(organization.id));
+  }
+}
+
+export async function seedOrganizationDefaults(organizationId: number) {
+  await withOrganizationContext(organizationId, async () => {
+    await seedAgents();
+    await seedAppSettings();
+    await seedAiModelPrices();
+    await seedNotificationSettings();
+    await backfillAiUsageLogs();
+  });
+}
+
+async function ensureOrganizationMemberships() {
+  const organization = await get<{ id: number }>("SELECT id FROM organizations ORDER BY id LIMIT 1");
+  if (!organization) throw new Error("Nenhuma organizacao disponivel.");
+  const initialName = process.env.INITIAL_ORGANIZATION_NAME?.trim();
+  if (initialName && initialName.length >= 2) {
+    await run("UPDATE organizations SET name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", [initialName, organization.id]);
+  }
+  await run(
+    `INSERT INTO organization_members (organization_id, user_id, role, status, is_default)
+     SELECT ?, u.id, CASE WHEN u.role = 'admin' THEN 'owner' ELSE 'member' END, 'active', TRUE
+     FROM users u
+     WHERE NOT EXISTS (SELECT 1 FROM organization_members m WHERE m.user_id = u.id)
+     ON CONFLICT (organization_id, user_id) DO NOTHING`,
+    [organization.id]
+  );
 }
 
 async function seedInitialAdmin() {
@@ -664,7 +923,7 @@ async function seedAppSettings() {
     ai_cost_limit_mode: "alert"
   };
   for (const [key, value] of Object.entries(defaults)) {
-    await run("INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING", [key, value]);
+    await run("INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(organization_id, key) DO NOTHING", [key, value]);
   }
 }
 
@@ -675,7 +934,7 @@ async function seedAiModelPrices() {
       `INSERT INTO ai_model_prices (
         model, input_price_per_1m_tokens, output_price_per_1m_tokens, image_price, currency, active
       ) VALUES (?, 0, 0, 0, ?, TRUE)
-      ON CONFLICT(model) DO NOTHING`,
+      ON CONFLICT(organization_id, model) DO NOTHING`,
       [model, process.env.AI_DEFAULT_CURRENCY ?? "USD"]
     );
   }
@@ -700,7 +959,7 @@ async function seedNotificationSettings() {
   await run(
     `INSERT INTO notification_settings (scope_type, scope_id, channel, enabled, settings_json)
      VALUES ('global', NULL, 'whatsapp', TRUE, ?)
-     ON CONFLICT (scope_type, channel) WHERE scope_id IS NULL DO NOTHING`,
+     ON CONFLICT (organization_id, scope_type, channel) WHERE scope_id IS NULL DO NOTHING`,
     [JSON.stringify(defaults)]
   );
 }
@@ -821,7 +1080,7 @@ async function createAgentIfMissing(agent: Record<string, unknown>) {
       @name, @key, @description, @role, @model, @temperature, @max_tokens,
       @system_prompt, @prompt_template, @output_schema_json, @contract_key, @contract_version,
       TRUE, @execution_order
-    ) ON CONFLICT(key) DO NOTHING`,
+    ) ON CONFLICT(organization_id, key) DO NOTHING`,
     agent
   );
 }

@@ -196,6 +196,27 @@ export interface AuthUser {
   name: string;
   email: string;
   role: "admin" | "user";
+  organizationRole: "owner" | "admin" | "member";
+  organization: AuthOrganization;
+  organizations: AuthOrganization[];
+}
+
+export interface AuthOrganization {
+  id: number;
+  name: string;
+  slug: string;
+  role: "owner" | "admin" | "member";
+  planCode: string;
+  billingStatus: string;
+}
+
+export interface OrganizationMember {
+  id: number;
+  name: string;
+  email: string;
+  role: "owner" | "admin" | "member";
+  status: "invited" | "active" | "suspended";
+  created_at: string;
 }
 
 export interface LoginResponse {

@@ -172,3 +172,16 @@ A tela `Planejador` permite criar campanhas em massa por tema, periodo, clientes
 - `UPLOAD_FILES_DIR`: diretório persistente dos arquivos enviados.
 - `PLANNER_TIME_ZONE`: fuso usado pelo agendamento; padrão `America/Sao_Paulo`.
 - `FRONTEND_ORIGIN`: origem permitida no CORS.
+- `INITIAL_ORGANIZATION_NAME`: nome da empresa que receberá os dados existentes na primeira migração multiempresa.
+
+## SaaS multiempresa
+
+Cada usuário autenticado opera dentro de uma organização selecionada. Clientes, campanhas, planejamentos, filas, agentes, custos, configurações e notificações recebem `organization_id` e são protegidos por Row-Level Security no PostgreSQL.
+
+- A primeira migração cria uma organização e vincula os usuários existentes sem perder dados.
+- Proprietários e administradores podem adicionar membros pela tela `Empresa e equipe`.
+- Um usuário pode participar de várias empresas e alternar entre elas no menu lateral.
+- Novas empresas recebem configurações, preços e agentes próprios.
+- Imagens e uploads locais exigem autenticação e confirmação de propriedade da organização.
+
+Durante a migração, o sistema cria o papel operacional `ecriativo_tenant`, sem `SUPERUSER` e sem `BYPASSRLS`. Cada requisição assume esse papel, inclusive quando a credencial de conexão possui privilégios elevados. Ainda assim, prefira uma credencial PostgreSQL dedicada e mantenha `JWT_SECRET` exclusivo por ambiente.
