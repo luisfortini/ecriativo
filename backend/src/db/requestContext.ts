@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type { PoolClient } from "pg";
 
 export interface DatabaseRequestContext {
-  client: PoolClient;
+  client?: PoolClient;
   organizationId: number;
   userId?: number;
 }

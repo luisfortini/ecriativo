@@ -1,7 +1,7 @@
 import cors from "cors";
 import express from "express";
 import { config, validateAuthConfig } from "./config.js";
-import { databaseHealth, pool } from "./db/connection.js";
+import { databaseHealth, pool, validateTenantRole } from "./db/connection.js";
 import { migrate } from "./db/migrate.js";
 import { requireAuth } from "./middleware/authMiddleware.js";
 import { requireOrganization } from "./middleware/organizationMiddleware.js";
@@ -68,6 +68,7 @@ app.use(errorHandler);
 async function bootstrap() {
   validateAuthConfig();
   await migrate();
+  await validateTenantRole();
   const tasks = startQueueWorker();
   const server = app.listen(config.port, "0.0.0.0", () => {
     console.log(`e-Criativo API em http://0.0.0.0:${config.port}`);

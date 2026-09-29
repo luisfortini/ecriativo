@@ -180,8 +180,11 @@ Cada usuário autenticado opera dentro de uma organização selecionada. Cliente
 
 - A primeira migração cria uma organização e vincula os usuários existentes sem perder dados.
 - Proprietários e administradores podem adicionar membros pela tela `Empresa e equipe`.
+- Proprietários e administradores gerenciam agentes, planejamentos, fila, custos, configurações de WhatsApp e aprovações. Membros operam clientes e campanhas dentro da empresa selecionada.
 - Um usuário pode participar de várias empresas e alternar entre elas no menu lateral.
 - Novas empresas recebem configurações, preços e agentes próprios.
 - Imagens e uploads locais exigem autenticação e confirmação de propriedade da organização.
 
-Durante a migração, o sistema cria o papel operacional `ecriativo_tenant`, sem `SUPERUSER` e sem `BYPASSRLS`. Cada requisição assume esse papel, inclusive quando a credencial de conexão possui privilégios elevados. Ainda assim, prefira uma credencial PostgreSQL dedicada e mantenha `JWT_SECRET` exclusivo por ambiente.
+Durante a migração, o sistema cria o papel operacional `ecriativo_tenant`, sem `SUPERUSER` e sem `BYPASSRLS`. Cada consulta da empresa assume esse papel quando a credencial de conexão possui privilégios elevados. O servidor verifica o acesso ao banco na inicialização. Prefira uma credencial PostgreSQL dedicada e mantenha `JWT_SECRET` exclusivo por ambiente.
+
+Para testar as permissões de gestão, execute `npm run test:tenant --workspace backend`. O teste de integração com RLS usa um PostgreSQL de staging isolado: configure `STAGING_DATABASE_URL` e execute `npm run smoke:improvements --workspace backend`.

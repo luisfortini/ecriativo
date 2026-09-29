@@ -5,18 +5,20 @@ import { useAuth } from "../auth/AuthContext";
 const navItems = [
   { to: "/", label: "Campanhas", icon: LayoutDashboard },
   { to: "/clientes", label: "Clientes", icon: Users },
-  { to: "/agentes", label: "Central de Agentes", icon: Bot },
-  { to: "/custos-ia", label: "Custos de IA", icon: DollarSign },
-  { to: "/whatsapp", label: "WhatsApp", icon: MessageCircle },
-  { to: "/planejador", label: "Planejador", icon: CalendarClock },
+  { to: "/agentes", label: "Central de Agentes", icon: Bot, manager: true },
+  { to: "/custos-ia", label: "Custos de IA", icon: DollarSign, manager: true },
+  { to: "/whatsapp", label: "WhatsApp", icon: MessageCircle, manager: true },
+  { to: "/planejador", label: "Planejador", icon: CalendarClock, manager: true },
   { to: "/nova-campanha", label: "Nova campanha", icon: Plus },
   { to: "/historico", label: "Histórico", icon: Clock3 },
-  { to: "/empresa", label: "Empresa e equipe", icon: Building2 }
+  { to: "/empresa", label: "Empresa e equipe", icon: Building2, manager: true }
 ];
 
 export function AppShell() {
   const { user, logout, switchOrganization } = useAuth();
   const navigate = useNavigate();
+  const canManage = user?.organizationRole === "owner" || user?.organizationRole === "admin";
+  const visibleNavItems = navItems.filter((item) => !item.manager || canManage);
 
   async function signOut() {
     await logout();
@@ -36,7 +38,7 @@ export function AppShell() {
         </div>
 
         <nav className="mt-8 flex-1 space-y-1">
-          {navItems.map((item) => (
+          {visibleNavItems.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
@@ -97,7 +99,7 @@ export function AppShell() {
             </button>
           </div>
           <nav className="flex gap-2 overflow-x-auto">
-            {navItems.map((item) => (
+            {visibleNavItems.map((item) => (
               <NavLink
                 key={item.to}
                 to={item.to}
@@ -112,9 +114,20 @@ export function AppShell() {
               </NavLink>
             ))}
           </nav>
+          <label className="mt-3 block text-xs font-medium text-slate-500" htmlFor="mobile-organization-switcher">Empresa</label>
+          <select
+            id="mobile-organization-switcher"
+            className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-2 text-sm text-ink"
+            value={user?.organization.id ?? ""}
+            onChange={(event) => void switchOrganization(Number(event.target.value)).then(() => navigate("/", { replace: true }))}
+          >
+            {user?.organizations.map((organization) => (
+              <option key={organization.id} value={organization.id}>{organization.name}</option>
+            ))}
+          </select>
         </header>
         <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-          <Outlet />
+          <Outlet key={user?.organization.id} />
         </main>
       </div>
     </div>

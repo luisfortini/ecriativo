@@ -20,8 +20,17 @@ export function toPostgresBoolean(value: unknown) {
 
 export async function query<T extends QueryResultRow = Record<string, unknown>>(sql: string, params?: QueryParams, client?: PoolClient) {
   const prepared = prepareSql(sql, params);
-  const executor = client ?? getDatabaseRequestContext()?.client ?? pool;
-  return executor.query(prepared.sql, prepared.values) as Promise<QueryResult<T>>;
+  const context = getDatabaseRequestContext();
+  const executor = client ?? context?.client;
+  if (executor) return executor.query(prepared.sql, prepared.values) as Promise<QueryResult<T>>;
+  if (context) {
+    return withOrganizationContext(context.organizationId, async () => {
+      const scopedClient = getDatabaseRequestContext()?.client;
+      if (!scopedClient) throw new Error("Contexto de banco nao disponivel.");
+      return scopedClient.query(prepared.sql, prepared.values) as Promise<QueryResult<T>>;
+    }, context.userId);
+  }
+  return pool.query(prepared.sql, prepared.values) as Promise<QueryResult<T>>;
 }
 
 export async function all<T extends QueryResultRow = Record<string, unknown>>(sql: string, params?: QueryParams, client?: PoolClient) {
@@ -46,7 +55,8 @@ export async function exec(sql: string, client?: PoolClient) {
 }
 
 export async function transaction<T>(callback: (client: PoolClient) => Promise<T>) {
-  const contextualClient = getDatabaseRequestContext()?.client;
+  const context = getDatabaseRequestContext();
+  const contextualClient = context?.client;
   if (contextualClient) {
     const savepoint = `nested_${Date.now()}_${Math.random().toString(16).slice(2)}`;
     await contextualClient.query(`SAVEPOINT ${savepoint}`);
@@ -62,7 +72,13 @@ export async function transaction<T>(callback: (client: PoolClient) => Promise<T
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    const result = await callback(client);
+    if (context) {
+      await client.query("SELECT set_config('app.organization_id', $1, true)", [String(context.organizationId)]);
+      await assumeTenantRole(client);
+    }
+    const result = context
+      ? await runWithDatabaseRequestContext({ ...context, client }, () => callback(client))
+      : await callback(client);
     await client.query("COMMIT");
     return result;
   } catch (error) {
@@ -90,6 +106,10 @@ export async function withOrganizationContext<T>(organizationId: number, callbac
   }
 }
 
+export function runWithOrganizationContext<T>(organizationId: number, callback: () => T, userId?: number) {
+  return runWithDatabaseRequestContext({ organizationId, userId }, callback);
+}
+
 export async function assumeTenantRole(client: PoolClient) {
   const result = await client.query<{ elevated: boolean }>(
     `SELECT (r.rolsuper OR r.rolbypassrls) elevated
@@ -97,6 +117,24 @@ export async function assumeTenantRole(client: PoolClient) {
   );
   if (result.rows[0]?.elevated) {
     await client.query('SET LOCAL ROLE "ecriativo_tenant"');
+  }
+}
+
+export async function validateTenantRole() {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await assumeTenantRole(client);
+    const result = await client.query<{ elevated: boolean }>(
+      `SELECT (r.rolsuper OR r.rolbypassrls) elevated
+         FROM pg_roles r WHERE r.rolname = current_user`
+    );
+    if (result.rows[0]?.elevated) {
+      throw new Error("A conexao da aplicacao nao pode operar com SUPERUSER ou BYPASSRLS. Configure o papel ecriativo_tenant ou uma credencial sem esses privilegios.");
+    }
+    await client.query("SELECT 1 FROM clients LIMIT 0");
+  } finally {
+    await client.query("ROLLBACK").finally(() => client.release());
   }
 }
 
