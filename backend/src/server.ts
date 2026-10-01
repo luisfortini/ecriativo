@@ -7,6 +7,7 @@ import { requireAuth } from "./middleware/authMiddleware.js";
 import { requireOrganization } from "./middleware/organizationMiddleware.js";
 import { authRoutes } from "./routes/authRoutes.js";
 import { campaignRoutes } from "./routes/campaignRoutes.js";
+import { contentRoutes } from "./routes/contentRoutes.js";
 import { startQueueWorker } from "./services/queueWorker.js";
 import { errorHandler } from "./utils/errors.js";
 import { asyncHandler } from "./utils/asyncHandler.js";
@@ -63,6 +64,7 @@ app.get("/health/database", async (_req, res, next) => {
 
 app.use("/api/auth", authRoutes);
 app.use("/api", requireAuth, requireOrganization, campaignRoutes);
+app.use("/api", requireAuth, requireOrganization, contentRoutes);
 app.use(errorHandler);
 
 async function bootstrap() {

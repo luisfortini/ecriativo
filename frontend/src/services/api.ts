@@ -23,7 +23,7 @@ import { clearAuthToken, getAuthToken } from "../auth/authStorage";
 
 export const API_URL = window.__APP_CONFIG__?.VITE_API_URL || import.meta.env.VITE_API_URL || "http://localhost:3333/api";
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
+export async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const headers = new Headers(options?.headers);
   const token = getAuthToken();
   if (token) headers.set("Authorization", `Bearer ${token}`);

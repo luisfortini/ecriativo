@@ -11,8 +11,9 @@ export async function generatedMediaController(req: Request, res: Response) {
   const owner = await get(
     `SELECT id FROM campaigns
      WHERE image_url LIKE ? OR final_image_url LIKE ? OR image_path LIKE ?
+     UNION ALL SELECT s.id FROM social_contents s WHERE EXISTS(SELECT 1 FROM jsonb_array_elements(s.images) image WHERE image->>'filename' = ?)
      LIMIT 1`,
-    [pattern, pattern, pattern]
+    [pattern, pattern, pattern, filename]
   );
   if (!owner) throw new AppError("Arquivo nao encontrado.", 404);
   await sendTenantFile(res, config.generatedFilesDir, filename);
@@ -25,8 +26,9 @@ export async function uploadedMediaController(req: Request, res: Response) {
     `SELECT id FROM client_assets WHERE file_url LIKE ?
      UNION ALL
      SELECT id FROM campaigns WHERE reference_file_path LIKE ?
+     UNION ALL SELECT id FROM visual_photos WHERE filename = ?
      LIMIT 1`,
-    [pattern, pattern]
+    [pattern, pattern, filename]
   );
   if (!owner) throw new AppError("Arquivo nao encontrado.", 404);
   await sendTenantFile(res, config.uploadFilesDir, filename);

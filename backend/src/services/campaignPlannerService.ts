@@ -7,12 +7,14 @@ import type { CampaignFormat } from "../types.js";
 import { createCampaign, setCampaignCreativeStatus } from "./campaignService.js";
 import { getClient } from "./clientService.js";
 import { sendQueueFailedAsync } from "./whatsappNotificationService.js";
+import { visualSelectionSchema, type VisualSelection } from "./visualLibraryService.js";
 
 type RecurrenceType = "once" | "daily" | "weekly" | "biweekly" | "monthly";
 type PlanStatus = "draft" | "active" | "paused" | "completed";
 type ApprovalMode = "draft" | "waiting_review" | "approved";
 
 interface PlanInput {
+  visual_selection?: VisualSelection;
   name: string;
   theme: string;
   strategic_description?: string;
@@ -96,6 +98,7 @@ export async function createPlan(input: PlanInput) {
     ]
   );
   const id = Number(result.lastInsertRowid);
+  await run("UPDATE campaign_plans SET visual_selection=?::jsonb WHERE id=?",[JSON.stringify(visualSelectionSchema.parse(input.visual_selection ?? {})),id]);
   await savePlanClients(id, input.clients, input.ads_per_client);
   if (input.status === "active") await activatePlan(id);
   return getPlan(id);
@@ -176,6 +179,7 @@ export async function updatePlan(id: number, input: PlanInput) {
       await createQueueForPlan(updatedPlan, remainingClients, client);
     }
     await logPlan(null, id, null, "updated", "Planejamento atualizado; itens futuros da fila foram recalculados.", undefined, client);
+    await run("UPDATE campaign_plans SET visual_selection=?::jsonb WHERE id=?",[JSON.stringify(visualSelectionSchema.parse(input.visual_selection ?? {})),id],client);
   });
   return getPlan(id);
 }
@@ -185,6 +189,7 @@ export async function duplicatePlan(id: number) {
   if (!plan) throw new AppError("Planejamento não encontrado.", 404);
   const record = plan as unknown as Record<string, unknown> & { clients: Array<{ client_id: number; ads_quantity: number }> };
   return createPlan({
+    visual_selection: visualSelectionSchema.parse(record.visual_selection ?? {}),
     name: `${String(record.name)} (cópia)`,
     theme: String(record.theme),
     strategic_description: record.strategic_description ? String(record.strategic_description) : undefined,
@@ -365,6 +370,7 @@ async function processQueueItem(item: QueueItem) {
     const campaign = await createCampaign(
       {
         client_id: clientId,
+        visual_selection: plan.visual_selection,
         free_briefing: buildAutoBriefing(plan, item, history),
         objetivo: plan.objective,
         oferta: plan.theme,
@@ -527,6 +533,7 @@ function safeArray(value: string | null) {
 }
 
 export interface PlannerPlan {
+  visual_selection?: VisualSelection;
   id: number;
   name: string;
   theme: string;

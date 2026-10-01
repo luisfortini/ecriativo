@@ -17,8 +17,10 @@ import {
   updatePlan
 } from "../services/campaignPlannerService.js";
 import { AppError } from "../utils/errors.js";
+import { selectionInput } from "../services/visualLibraryService.js";
 
 const planSchema = z.object({
+  visual_selection: selectionInput,
   name: z.string().min(2),
   theme: z.string().min(2),
   strategic_description: z.string().optional(),

@@ -30,6 +30,7 @@ export interface CampaignInput {
 }
 
 export interface NewCampaignInput {
+  visual_selection?: import("./services/visualLibraryService.js").VisualSelection;
   client_id: number;
   free_briefing: string;
   objetivo?: string;
@@ -44,6 +45,12 @@ export interface NewCampaignInput {
 }
 
 export interface ClientProfile {
+  country?: string | null;
+  state?: string | null;
+  city?: string | null;
+  time_zone?: string;
+  anniversary_date?: string | null;
+  founding_year?: string | null;
   id: number;
   name: string;
   segment: string | null;

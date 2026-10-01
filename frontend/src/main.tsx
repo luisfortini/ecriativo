@@ -22,6 +22,7 @@ import { Dashboard } from "./pages/Dashboard";
 import { NewCampaign } from "./pages/NewCampaign";
 import { Login } from "./pages/Login";
 import { OrganizationSettings } from "./pages/OrganizationSettings";
+import { SocialMedia } from "./pages/SocialMedia";
 import "./styles.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
@@ -36,6 +37,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
                 <Route path="/" element={<Dashboard />} />
                 <Route path="/clientes" element={<Clients />} />
                 <Route element={<ManagerRoute />}>
+                  <Route path="/social-media" element={<SocialMedia />} />
                   <Route path="/agentes" element={<AgentCenter />} />
                   <Route path="/planejador" element={<CampaignPlanner />} />
                   <Route path="/planejador/novo" element={<NewCampaignPlan />} />

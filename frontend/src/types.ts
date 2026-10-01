@@ -38,6 +38,12 @@ export interface ClientAsset {
 }
 
 export interface ClientProfile extends ClientSummary {
+  country?: string | null;
+  state?: string | null;
+  city?: string | null;
+  time_zone?: string;
+  anniversary_date?: string | null;
+  founding_year?: string | null;
   business_description: string | null;
   target_audience: string | null;
   differentiators: string | null;
@@ -387,6 +393,7 @@ export interface AgentTestResult {
 }
 
 export interface CampaignPlan {
+  visual_selection?: import("./components/VisualLibrary").VisualSelection;
   id: number;
   name: string;
   theme: string;

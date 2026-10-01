@@ -6,8 +6,15 @@ import { analyzeClientBrand, applyBrandAnalysis, getClientBrandAnalyses, reanaly
 import type { ClientAssetType } from "../types.js";
 import { AppError } from "../utils/errors.js";
 import { validateMainLogoFile } from "../services/brandOverlayService.js";
+import { validAnniversary, validTimeZone } from "../services/editorialCalendar.js";
 
 const clientSchema = z.object({
+  country: z.string().trim().max(80).optional(),
+  state: z.string().trim().max(80).optional(),
+  city: z.string().trim().max(120).optional(),
+  time_zone: z.string().refine(validTimeZone, "Fuso horario invalido.").optional(),
+  anniversary_date: z.string().refine(v => !v || validAnniversary(v), "Aniversario deve ser MM-DD, como 09-29.").optional(),
+  founding_year: z.string().refine(v => !v || (/^\d{4}$/.test(v) && Number(v) >= 1000 && Number(v) <= new Date().getFullYear()), "Ano de fundacao invalido.").optional(),
   name: z.string().min(2, "Informe o nome do cliente."),
   segment: z.string().optional(),
   business_description: z.string().optional(),

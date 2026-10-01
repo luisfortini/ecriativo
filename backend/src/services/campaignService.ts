@@ -24,6 +24,7 @@ import { sendCampaignCompletedAsync } from "./whatsappNotificationService.js";
 import { normalizeBriefing } from "./briefingNormalizerService.js";
 import { appendClientLearning, getClient, listClientAssets } from "./clientService.js";
 import { generateImage } from "./openaiService.js";
+import { resolveVisuals, validateVisualReferences, visualSelectionSchema } from "./visualLibraryService.js";
 import { getActiveProfileDiagnostic, type ProfileDiagnosticRecord } from "./profileDiagnosticService.js";
 
 export async function createCampaign(
@@ -35,8 +36,12 @@ export async function createCampaign(
   if (!client) throw new Error("Cliente nao encontrado.");
 
   const assets = await listClientAssets(input.client_id);
+  const selection = visualSelectionSchema.parse(input.visual_selection ?? {});
+  const references = await resolveVisuals(input.client_id, selection, "ads");
   const normalized = await normalizeBriefing(input, client as ClientProfile, assets);
+  normalized.observations += `\nMateriais obrigatórios: ${references.map(r => `${r.kind}: ${r.name}; preservar ${r.preservation_notes}`).join("; ")}. ${selection.no_people ? "Não incluir pessoas." : ""}`;
   const campaignId = await createPendingCampaign(input, normalized, referenceFilePath);
+  await run("UPDATE campaigns SET visual_selection=?::jsonb WHERE id=?", [JSON.stringify({ ...selection, references }), campaignId]);
   let pipelineRunId: number | null = null;
 
   try {
@@ -102,6 +107,7 @@ export async function createCampaign(
       }
     );
 
+    await validateVisualReferences(input.client_id,references,"ads");
     const image = await runCampaignPipelineStep(pipelineRunId, "image_generation", () =>
       generateImage(
         buildImageGenerationPrompt(creativeOutput, normalized),
@@ -112,7 +118,8 @@ export async function createCampaign(
           campaignPlanId: options?.campaignPlanId ?? null,
           queueId: options?.queueId ?? null,
           operationType: options?.reprocess ? "reprocessamento" : "geracao_imagem"
-        }
+        },
+        { references, mode: selection.mode, no_people: selection.no_people }
       )
     );
     const brandOverlay = await runCampaignPipelineStep(pipelineRunId, "brand_overlay", () =>

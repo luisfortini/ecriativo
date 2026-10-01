@@ -7,8 +7,10 @@ import { PageHeader } from "../components/PageHeader";
 import { analyzeClientBrand, applyBrandAnalysis, getClient, getClientWhatsappSettings, reanalyzeClientMaterials, saveClientWhatsappSettings, updateClient, uploadClientAsset } from "../services/api";
 import type { ClientAssetType, ClientProfile } from "../types";
 import { uiLabel } from "../utils/uiLabels";
+import { VisualLibrary } from "../components/VisualLibrary";
 
 const fields = {
+  country: "", state: "", city: "", time_zone: "America/Sao_Paulo", anniversary_date: "", founding_year: "",
   name: "",
   segment: "",
   business_description: "",
@@ -32,6 +34,7 @@ const fields = {
 };
 
 const fieldLabels: Record<keyof typeof fields, string> = {
+  country: "País", state: "Estado", city: "Cidade", time_zone: "Fuso horário (ex.: America/Sao_Paulo)", anniversary_date: "Aniversário da empresa (MM-DD)", founding_year: "Ano de fundação (opcional)",
   name: "Nome",
   segment: "Segmento",
   business_description: "Descrição do negócio",
@@ -54,7 +57,7 @@ const fieldLabels: Record<keyof typeof fields, string> = {
   instagram_url: "Instagram"
 };
 
-const tabs = ["Dados gerais", "Identidade visual", "Tom de voz", "Referências", "Restrições", "Análise de Marca", "Histórico", "Aprendizados", "Notificações"];
+const tabs = ["Dados gerais", "Produtos e pessoas", "Identidade visual", "Tom de voz", "Referências", "Restrições", "Análise de Marca", "Histórico", "Aprendizados", "Notificações"];
 
 const notificationDefaults: Record<string, string | boolean> = {
   responsible_phone: "",
@@ -235,7 +238,7 @@ export function ClientProfilePage() {
   }
 
   const visibleFields = useMemo(() => {
-    if (tab === "Dados gerais") return ["name", "segment", "business_description", "target_audience", "differentiators", "positioning", "site_url", "instagram_url"];
+    if (tab === "Dados gerais") return ["name", "segment", "business_description", "target_audience", "differentiators", "positioning", "site_url", "instagram_url", "country", "state", "city", "time_zone", "anniversary_date", "founding_year"];
     if (tab === "Identidade visual") return ["color_palette", "forbidden_colors", "preferred_typography"];
     if (tab === "Tom de voz") return ["brand_voice", "preferred_ctas"];
     if (tab === "Referências") return ["visual_references", "approved_styles"];
@@ -265,7 +268,7 @@ export function ClientProfilePage() {
         ))}
       </div>
 
-      {tab === "Análise de Marca" ? (
+      {tab === "Produtos e pessoas" ? <VisualLibrary clientId={Number(client.id)} /> : tab === "Análise de Marca" ? (
         <BrandAnalysisTab
           client={client}
           form={form}
@@ -355,7 +358,11 @@ export function ClientProfilePage() {
 
 function TextField(props: { field: keyof typeof fields; value: string; onChange: React.Dispatch<React.SetStateAction<typeof fields>> }) {
   const label = fieldLabels[props.field];
-  const isLong = !["name", "segment", "color_palette", "forbidden_colors", "preferred_typography"].includes(props.field);
+  if (props.field === "anniversary_date") {
+    const [month,day] = (props.value || "-").split("-");
+    return <div><label className="label">Aniversário da empresa</label><div className="flex gap-2"><input aria-label="Dia do aniversário" className="field" type="number" min={1} max={31} placeholder="Dia" value={day || ""} onChange={e=>props.onChange(current=>({...current,anniversary_date:`${month || ""}-${e.target.value ? e.target.value.padStart(2,"0") : ""}`}))}/><select aria-label="Mês do aniversário" className="field" value={month || ""} onChange={e=>props.onChange(current=>({...current,anniversary_date:`${e.target.value}-${day || ""}`}))}><option value="">Mês</option>{["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"].map((name,index)=><option key={name} value={String(index+1).padStart(2,"0")}>{name}</option>)}</select></div><button type="button" className="text-xs underline" onClick={()=>props.onChange(current=>({...current,anniversary_date:""}))}>Limpar data</button><p className="text-xs text-slate-500">O ano de fundação é opcional e permite calcular quantos anos a empresa completa.</p></div>;
+  }
+  const isLong = !["name", "segment", "color_palette", "forbidden_colors", "preferred_typography", "country", "state", "city", "time_zone", "founding_year"].includes(props.field);
   return (
     <div className={isLong ? "md:col-span-2" : undefined}>
       <label className="label">{label}</label>

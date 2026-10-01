@@ -3,6 +3,7 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 
 const navItems = [
+  { to: "/social-media", label: "Social media", icon: CalendarClock, manager: true },
   { to: "/", label: "Campanhas", icon: LayoutDashboard },
   { to: "/clientes", label: "Clientes", icon: Users },
   { to: "/agentes", label: "Central de Agentes", icon: Bot, manager: true },

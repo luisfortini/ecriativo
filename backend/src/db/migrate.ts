@@ -4,6 +4,7 @@ import {
   ProfileDiagnosticSchema
 } from "../contracts/index.js";
 import bcrypt from "bcryptjs";
+import { contentMigration } from "./contentMigration.js";
 import { all, exec, get, run, withOrganizationContext } from "./connection.js";
 
 interface Migration {
@@ -827,7 +828,7 @@ const migrations: Migration[] = [
           ARRAY['campaign_reviews','reviews_campaign_org_fk','campaign_id','campaigns'],
           ARRAY['campaign_reviews','reviews_client_org_fk','client_id','clients']
         ] LOOP
-          IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = spec[2]) THEN
+          IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = spec[2] AND conrelid = to_regclass(spec[1])) THEN
             EXECUTE format(
               'ALTER TABLE %I ADD CONSTRAINT %I FOREIGN KEY (organization_id, %I) REFERENCES %I(organization_id, id)',
               spec[1], spec[2], spec[3], spec[4]
@@ -843,7 +844,7 @@ export async function migrate() {
   await exec("CREATE TABLE IF NOT EXISTS schema_migrations (id TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP)");
   const appliedRows = await all<{ id: string }>("SELECT id FROM schema_migrations");
   const applied = new Set(appliedRows.map((row) => row.id));
-  for (const migration of migrations) {
+  for (const migration of [...migrations, contentMigration]) {
     if (applied.has(migration.id)) continue;
     await exec(migration.up);
     await run("INSERT INTO schema_migrations (id) VALUES (?)", [migration.id]);

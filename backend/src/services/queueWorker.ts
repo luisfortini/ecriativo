@@ -2,8 +2,12 @@ import cron from "node-cron";
 import { all, runWithOrganizationContext } from "../db/connection.js";
 import { processDueQueue } from "./campaignPlannerService.js";
 import { sendDailySummary } from "./whatsappNotificationService.js";
+import { processEditorialQueue } from "./editorialService.js";
 
 export function startQueueWorker() {
+  const editorialTask = cron.schedule("* * * * *", () => {
+    void processEditorialQueue().catch(error => console.error("Erro no worker editorial",error));
+  });
   const queueTask = cron.schedule("* * * * *", () => {
     processDueQueue().catch((error) => {
       console.error("Erro no worker da fila de campanhas", error);
@@ -15,7 +19,7 @@ export function startQueueWorker() {
     });
   });
 
-  return [queueTask, dailySummaryTask];
+  return [queueTask, dailySummaryTask, editorialTask];
 }
 
 export async function sendDailySummaries() {
