@@ -8,6 +8,7 @@ import { appendDictation, VoiceDictationButton } from "../components/VoiceDictat
 import { getCampaignPlan, getClients, saveCampaignPlan } from "../services/api";
 import type { CampaignPlan, ClientSummary } from "../types";
 import { optionLabel } from "../utils/uiLabels";
+import { emptySelection } from "../components/VisualLibrary";
 
 const initial = {
   name: "",
@@ -39,6 +40,7 @@ const days = [
 ];
 
 export function NewCampaignPlan() {
+  const [visual,setVisual]=useState(emptySelection);
   const { id } = useParams();
   const editing = Boolean(id);
   const [form, setForm] = useState(initial);
@@ -61,6 +63,7 @@ export function NewCampaignPlan() {
   }, [id]);
 
   function fillPlanForm(plan: CampaignPlan) {
+    setVisual({...emptySelection,...plan.visual_selection});
     setForm({
       name: plan.name,
       theme: plan.theme,
@@ -94,6 +97,7 @@ export function NewCampaignPlan() {
     setError("");
     try {
       const payload = {
+        visual_selection:visual,
         ...form,
         ads_per_client: Number(form.ads_per_client),
         max_ads_per_day: Number(form.max_ads_per_day),
@@ -122,6 +126,7 @@ export function NewCampaignPlan() {
       {error && <ErrorBanner message={error} />}
       <form className="grid gap-6 xl:grid-cols-[1fr_380px]" onSubmit={submit}>
         <section className="panel p-5">
+          <fieldset className="mb-5 rounded border p-3"><legend>Fotos reais por cliente</legend><p className="mb-2 text-xs text-slate-500">A seleção automática usa apenas os materiais autorizados de cada cliente.</p>{(['products','people'] as const).map(key=><label key={key} className="label">{key==='products'?'Produtos':'Pessoas/modelos'}<select className="field" value={visual[key]} onChange={e=>setVisual({...visual,[key]:e.target.value})}><option value="none">Não usar cadastrados</option><option value="auto">Seleção automática</option></select></label>)}<label className="label">Tratamento<select className="field" value={visual.mode} onChange={e=>setVisual({...visual,mode:e.target.value as 'reference'|'composition'})}><option value="reference">Cena com referências</option><option value="composition">Colagem com fotos originais</option></select></label></fieldset>
           <div className="grid gap-4 md:grid-cols-2">
             <Field label="Nome" value={form.name} onChange={(v) => setForm({ ...form, name: v })} required />
             <Field label="Tema da campanha" value={form.theme} onChange={(v) => setForm({ ...form, theme: v })} required dictation />

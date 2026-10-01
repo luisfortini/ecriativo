@@ -16,19 +16,21 @@ import type {
   ClientSummary,
   CreativeHistoryItem,
   LoginResponse,
-  AuthUser
+  AuthUser,
+  OrganizationMember
 } from "../types";
 import { clearAuthToken, getAuthToken } from "../auth/authStorage";
 
 export const API_URL = window.__APP_CONFIG__?.VITE_API_URL || import.meta.env.VITE_API_URL || "http://localhost:3333/api";
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
+export async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const headers = new Headers(options?.headers);
   const token = getAuthToken();
   if (token) headers.set("Authorization", `Bearer ${token}`);
 
   const response = await fetch(`${API_URL}${path}`, {
     ...options,
+    credentials: "include",
     headers
   });
   const payload = await response.json().catch(() => null);
@@ -58,6 +60,34 @@ export function getCurrentUser() {
 
 export function logoutRequest() {
   return request<void>("/auth/logout", { method: "POST" });
+}
+
+export function switchOrganizationRequest(organizationId: number) {
+  return request<LoginResponse>("/auth/switch-organization", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ organization_id: organizationId })
+  });
+}
+
+export function createOrganizationRequest(name: string) {
+  return request<{ id: number; name: string; slug: string; role: string }>("/auth/organizations", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name })
+  });
+}
+
+export function getOrganizationMembers() {
+  return request<OrganizationMember[]>("/organization/members");
+}
+
+export function addOrganizationMember(payload: { name: string; email: string; password?: string; role: "admin" | "member" }) {
+  return request<OrganizationMember[]>("/organization/members", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
 }
 
 export function getCampaigns() {

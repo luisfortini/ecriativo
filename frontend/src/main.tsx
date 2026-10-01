@@ -5,6 +5,7 @@ import { AuthProvider } from "./auth/AuthContext";
 import { AppShell } from "./components/AppShell";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ProtectedRoute } from "./components/ProtectedRoute";
+import { ManagerRoute } from "./components/ManagerRoute";
 import { CampaignHistory } from "./pages/CampaignHistory";
 import { CampaignResult } from "./pages/CampaignResult";
 import { AgentCenter } from "./pages/AgentCenter";
@@ -20,6 +21,8 @@ import { NewCampaignPlan } from "./pages/NewCampaignPlan";
 import { Dashboard } from "./pages/Dashboard";
 import { NewCampaign } from "./pages/NewCampaign";
 import { Login } from "./pages/Login";
+import { OrganizationSettings } from "./pages/OrganizationSettings";
+import { SocialMedia } from "./pages/SocialMedia";
 import "./styles.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
@@ -33,15 +36,19 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
               <Route element={<AppShell />}>
                 <Route path="/" element={<Dashboard />} />
                 <Route path="/clientes" element={<Clients />} />
-                <Route path="/agentes" element={<AgentCenter />} />
-                <Route path="/planejador" element={<CampaignPlanner />} />
-                <Route path="/planejador/novo" element={<NewCampaignPlan />} />
-                <Route path="/planejador/:id/editar" element={<NewCampaignPlan />} />
-                <Route path="/planejador/:id" element={<CampaignPlanDetail />} />
-                <Route path="/fila-geracao" element={<CampaignQueue />} />
-                <Route path="/execucoes-planejador" element={<CampaignPlannerLogs />} />
-                <Route path="/custos-ia" element={<AiCosts />} />
-                <Route path="/whatsapp" element={<WhatsappSettings />} />
+                <Route element={<ManagerRoute />}>
+                  <Route path="/social-media" element={<SocialMedia />} />
+                  <Route path="/agentes" element={<AgentCenter />} />
+                  <Route path="/planejador" element={<CampaignPlanner />} />
+                  <Route path="/planejador/novo" element={<NewCampaignPlan />} />
+                  <Route path="/planejador/:id/editar" element={<NewCampaignPlan />} />
+                  <Route path="/planejador/:id" element={<CampaignPlanDetail />} />
+                  <Route path="/fila-geracao" element={<CampaignQueue />} />
+                  <Route path="/execucoes-planejador" element={<CampaignPlannerLogs />} />
+                  <Route path="/custos-ia" element={<AiCosts />} />
+                  <Route path="/whatsapp" element={<WhatsappSettings />} />
+                  <Route path="/empresa" element={<OrganizationSettings />} />
+                </Route>
                 <Route path="/clientes/:id" element={<ClientProfilePage />} />
                 <Route path="/nova-campanha" element={<NewCampaign />} />
                 <Route path="/campanhas/:id" element={<CampaignResult />} />

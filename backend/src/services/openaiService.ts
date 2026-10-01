@@ -1,4 +1,6 @@
-import OpenAI from "openai";
+import OpenAI, { toFile } from "openai";
+import sharp from "sharp";
+import { photoPath, type VisualReference } from "./visualLibraryService.js";
 import type { ResponseTextConfig } from "openai/resources/responses/responses";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -115,15 +117,23 @@ export async function runCreativeAgent(input: NormalizedBriefing, strategy: Stra
 export async function generateImage(
   prompt: string,
   format: CampaignFormat,
-  metadata?: { clientId?: number | null; campaignId?: number | null; campaignPlanId?: number | null; queueId?: number | null; operationType?: AiOperationType }
+  metadata?: { clientId?: number | null; campaignId?: number | null; campaignPlanId?: number | null; queueId?: number | null; operationType?: AiOperationType },
+  visual?: { references: VisualReference[]; mode: "reference" | "composition"; no_people: boolean }
 ) {
+  if (!client && visual?.references.length) throw new Error("Configure a integração de imagens para usar fotos reais.");
   if (!client) return createLocalPlaceholder(prompt, format);
   const started = Date.now();
 
   try {
-    const response = await client.images.generate({
+    const refs = visual?.references ?? [];
+    const visualPrompt = `${prompt}\n${visual?.no_people ? "Não incluir pessoas, rostos ou silhuetas humanas." : ""}\n${refs.map((ref, index) => `Referência ${index + 1}: ${ref.kind === "person" ? "pessoa" : "produto"} ${ref.name}. Preserve: ${ref.preservation_notes}`).join("\n")}`;
+    const response = refs.length && visual?.mode === "reference" ? await client.images.edit({
       model: config.imageModel,
-      prompt,
+      image: await Promise.all(refs.map(async ref => toFile(await fs.readFile(photoPath(ref.filename)), ref.filename, { type: "image/png" }))),
+      prompt: visualPrompt, size: imageSize(format), quality: "medium", n: 1
+    }) : await client.images.generate({
+      model: config.imageModel,
+      prompt: visual?.mode === "composition" && refs.length ? `${prompt}\nCrie apenas um fundo, sem produtos, pessoas, textos ou logos. As fotos reais serão aplicadas depois.` : visualPrompt,
       size: imageSize(format),
       quality: "medium",
       n: 1
@@ -145,11 +155,26 @@ export async function generateImage(
 
     const image = response.data?.[0];
     if (image?.b64_json) {
-      const buffer = Buffer.from(image.b64_json, "base64");
+      let buffer = Buffer.from(image.b64_json, "base64");
+      if (visual?.mode === "composition" && refs.length) {
+        const unique = refs.filter((ref, index) => refs.findIndex(r => r.subject_id === ref.subject_id) === index);
+        const width = 1024;
+        const height = format === "4:5" ? 1280 : format === "9:16" ? 1824 : format === "16:9" ? 576 : 1024;
+        const tileWidth = Math.floor((width - 80) / unique.length);
+        const tiles = await Promise.all(unique.map(async (ref, index) => ({
+          input: await sharp(photoPath(ref.filename)).resize(tileWidth - 20, Math.floor(height * 0.7), { fit: "contain", background: "#ffffff" }).png().toBuffer(),
+          left: 40 + index * tileWidth, top: Math.floor(height * 0.15)
+        })));
+        buffer = await sharp(buffer).resize(width, height).composite(tiles).png().toBuffer();
+      }
+      if (visual) {
+        const dimensions = format === "9:16" ? [1080,1920] : format === "4:5" ? [1080,1350] : format === "16:9" ? [1920,1080] : [1080,1080];
+        buffer = await sharp(buffer).resize(dimensions[0],dimensions[1],{fit:"contain",background:"#ffffff"}).png().toBuffer();
+      }
       return { ...(await saveGeneratedImage(buffer, "png")), aiUsageLogId };
     }
 
-    if (image?.url) return { imagePath: null, imageUrl: image.url, aiUsageLogId };
+    if (image?.url && !refs.length) return { imagePath: null, imageUrl: image.url, aiUsageLogId };
 
     throw new Error("A geracao de imagem nao retornou arquivo ou URL.");
   } catch (error) {

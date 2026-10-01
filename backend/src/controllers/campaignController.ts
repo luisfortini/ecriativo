@@ -11,8 +11,10 @@ import {
   updateCampaignStatus
 } from "../services/campaignService.js";
 import { AppError } from "../utils/errors.js";
+import { selectionInput } from "../services/visualLibraryService.js";
 
 const campaignSchema = z.object({
+  visual_selection: selectionInput,
   client_id: z.coerce.number().int().positive("Selecione um cliente."),
   free_briefing: z.string().min(5, "Informe o briefing livre."),
   objetivo: z.string().optional(),

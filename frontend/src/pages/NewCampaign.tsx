@@ -6,6 +6,7 @@ import { PageHeader } from "../components/PageHeader";
 import { appendDictation, VoiceDictationButton } from "../components/VoiceDictationButton";
 import { createCampaign, getClient, getClients } from "../services/api";
 import type { ClientProfile, ClientSummary } from "../types";
+import { VisualSelector, emptySelection } from "../components/VisualLibrary";
 
 const formats = ["1:1", "4:5", "9:16", "16:9"] as const;
 
@@ -24,6 +25,7 @@ const initialForm = {
 };
 
 export function NewCampaign() {
+  const [visualSelection,setVisualSelection]=useState(emptySelection);
   const [form, setForm] = useState(initialForm);
   const [clients, setClients] = useState<ClientSummary[]>([]);
   const [memory, setMemory] = useState<ClientProfile | null>(null);
@@ -44,6 +46,7 @@ export function NewCampaign() {
   }, [location.search]);
 
   useEffect(() => {
+    setVisualSelection(emptySelection);
     if (!form.client_id) {
       setMemory(null);
       return;
@@ -61,6 +64,7 @@ export function NewCampaign() {
     setError("");
 
     const data = new FormData();
+    data.append("visual_selection",JSON.stringify(visualSelection));
     Object.entries(form).forEach(([key, value]) => data.append(key, value));
     if (file) data.append("referencia_arquivo", file);
 
@@ -124,6 +128,7 @@ export function NewCampaign() {
           </div>
 
           <div className="mt-4 grid gap-4">
+            <VisualSelector clientId={Number(form.client_id)} value={visualSelection} onChange={setVisualSelection}/>
             <TextArea label="Referências visuais desta campanha" name="referencias_visuais" value={form.referencias_visuais} onChange={update} />
             <TextArea label="Restrições desta campanha" name="restricoes" value={form.restricoes} onChange={update} />
             <TextArea label="Observações" name="observacoes" value={form.observacoes} onChange={update} />

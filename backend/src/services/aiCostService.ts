@@ -138,7 +138,7 @@ export async function upsertAiModelPrice(input: Record<string, unknown>) {
       `INSERT INTO ai_model_prices (
         model, input_price_per_1m_tokens, output_price_per_1m_tokens, image_price, currency, active
       ) VALUES (?, ?, ?, ?, ?, ?)
-      ON CONFLICT(model) DO UPDATE SET
+      ON CONFLICT(organization_id, model) DO UPDATE SET
         input_price_per_1m_tokens = excluded.input_price_per_1m_tokens,
         output_price_per_1m_tokens = excluded.output_price_per_1m_tokens,
         image_price = excluded.image_price,
@@ -302,7 +302,7 @@ export async function updateAiCostSettings(input: Record<string, unknown>) {
     if (input[key] !== undefined) {
       await run(
         `INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
+         ON CONFLICT(organization_id, key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
         [key, String(input[key])]
       );
     }

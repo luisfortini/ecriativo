@@ -65,6 +65,8 @@ import {
   updateWhatsappSettingsController
 } from "../controllers/whatsappController.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
+import { addOrganizationMemberController, listOrganizationMembersController } from "../controllers/organizationController.js";
+import { requireOrganizationRole } from "../middleware/organizationRoleMiddleware.js";
 
 const uploadDir = config.uploadFilesDir;
 fs.mkdirSync(uploadDir, { recursive: true });
@@ -75,6 +77,10 @@ const upload = multer({
 });
 
 export const campaignRoutes = Router();
+const requireManager = requireOrganizationRole("owner", "admin");
+
+campaignRoutes.get("/organization/members", requireManager, asyncHandler(listOrganizationMembersController));
+campaignRoutes.post("/organization/members", requireManager, asyncHandler(addOrganizationMemberController));
 
 campaignRoutes.get("/campaigns", asyncHandler(listCampaignsController));
 campaignRoutes.post("/campaigns", upload.single("referencia_arquivo"), asyncHandler(createCampaignController));
@@ -82,22 +88,23 @@ campaignRoutes.get("/campaigns/:id", asyncHandler(getCampaignController));
 campaignRoutes.get("/campaigns/:id/navigation", asyncHandler(creativeNavigationController));
 campaignRoutes.get("/campaigns/:id/duplicate", asyncHandler(duplicateCampaignController));
 campaignRoutes.post("/campaigns/:id/learning", asyncHandler(saveCampaignLearningController));
-campaignRoutes.patch("/campaigns/:id/status", asyncHandler(updateCampaignStatusController));
-campaignRoutes.post("/campaigns/:id/send-whatsapp", asyncHandler(sendCampaignWhatsappController));
+campaignRoutes.patch("/campaigns/:id/status", requireManager, asyncHandler(updateCampaignStatusController));
+campaignRoutes.post("/campaigns/:id/send-whatsapp", requireManager, asyncHandler(sendCampaignWhatsappController));
 campaignRoutes.get("/creatives", asyncHandler(listCreativesController));
 
 campaignRoutes.get("/clients", asyncHandler(listClientsController));
 campaignRoutes.post("/clients", asyncHandler(createClientController));
 campaignRoutes.get("/clients/:id", asyncHandler(getClientController));
 campaignRoutes.put("/clients/:id", asyncHandler(updateClientController));
-campaignRoutes.get("/clients/:id/whatsapp-settings", asyncHandler(getClientWhatsappSettingsController));
-campaignRoutes.put("/clients/:id/whatsapp-settings", asyncHandler(updateClientWhatsappSettingsController));
+campaignRoutes.get("/clients/:id/whatsapp-settings", requireManager, asyncHandler(getClientWhatsappSettingsController));
+campaignRoutes.put("/clients/:id/whatsapp-settings", requireManager, asyncHandler(updateClientWhatsappSettingsController));
 campaignRoutes.post("/clients/:id/assets", upload.single("file"), asyncHandler(addClientAssetController));
 campaignRoutes.get("/clients/:id/brand-analyses", asyncHandler(listClientBrandAnalysesController));
 campaignRoutes.post("/clients/:id/brand-analysis", asyncHandler(analyzeClientBrandController));
 campaignRoutes.post("/clients/:id/brand-analysis/reanalyze-materials", asyncHandler(reanalyzeClientMaterialsController));
 campaignRoutes.post("/clients/:id/brand-analysis/:analysisId/apply", asyncHandler(applyBrandAnalysisController));
 
+campaignRoutes.use("/agents", requireManager);
 campaignRoutes.get("/agents", asyncHandler(listAgentsController));
 campaignRoutes.post("/agents", asyncHandler(createAgentController));
 campaignRoutes.get("/agents/:id", asyncHandler(getAgentController));
@@ -108,26 +115,26 @@ campaignRoutes.get("/agents/:id/logs", asyncHandler(getAgentLogsController));
 campaignRoutes.post("/agents/:id/versions/:versionId/restore", asyncHandler(restoreAgentVersionController));
 campaignRoutes.get("/agents/:id/versions/:versionId/compare", asyncHandler(compareAgentVersionController));
 
-campaignRoutes.get("/campaign-plans", asyncHandler(listPlansController));
-campaignRoutes.post("/campaign-plans", asyncHandler(createPlanController));
-campaignRoutes.get("/campaign-plans/:id", asyncHandler(getPlanController));
-campaignRoutes.put("/campaign-plans/:id", asyncHandler(updatePlanController));
-campaignRoutes.post("/campaign-plans/:id/:action", asyncHandler(planActionController));
-campaignRoutes.get("/campaign-generation-queue", asyncHandler(listQueueController));
-campaignRoutes.post("/campaign-generation-queue/:id/reprocess", asyncHandler(reprocessQueueItemController));
-campaignRoutes.get("/campaign-generation-logs", asyncHandler(listPlannerLogsController));
-campaignRoutes.post("/queue/:id/notify-error", asyncHandler(notifyQueueErrorController));
+campaignRoutes.get("/campaign-plans", requireManager, asyncHandler(listPlansController));
+campaignRoutes.post("/campaign-plans", requireManager, asyncHandler(createPlanController));
+campaignRoutes.get("/campaign-plans/:id", requireManager, asyncHandler(getPlanController));
+campaignRoutes.put("/campaign-plans/:id", requireManager, asyncHandler(updatePlanController));
+campaignRoutes.post("/campaign-plans/:id/:action", requireManager, asyncHandler(planActionController));
+campaignRoutes.get("/campaign-generation-queue", requireManager, asyncHandler(listQueueController));
+campaignRoutes.post("/campaign-generation-queue/:id/reprocess", requireManager, asyncHandler(reprocessQueueItemController));
+campaignRoutes.get("/campaign-generation-logs", requireManager, asyncHandler(listPlannerLogsController));
+campaignRoutes.post("/queue/:id/notify-error", requireManager, asyncHandler(notifyQueueErrorController));
 
-campaignRoutes.get("/whatsapp/settings", asyncHandler(getWhatsappSettingsController));
-campaignRoutes.put("/whatsapp/settings", asyncHandler(updateWhatsappSettingsController));
-campaignRoutes.post("/whatsapp/test-connection", asyncHandler(testWhatsappConnectionController));
-campaignRoutes.post("/whatsapp/send-test", asyncHandler(sendWhatsappTestController));
+campaignRoutes.get("/whatsapp/settings", requireManager, asyncHandler(getWhatsappSettingsController));
+campaignRoutes.put("/whatsapp/settings", requireManager, asyncHandler(updateWhatsappSettingsController));
+campaignRoutes.post("/whatsapp/test-connection", requireManager, asyncHandler(testWhatsappConnectionController));
+campaignRoutes.post("/whatsapp/send-test", requireManager, asyncHandler(sendWhatsappTestController));
 
-campaignRoutes.get("/ai-costs", asyncHandler(aiCostDashboardController));
-campaignRoutes.get("/ai-costs/export/:format", asyncHandler(exportAiUsageController));
-campaignRoutes.get("/ai-costs/usage/:id", asyncHandler(aiUsageDetailController));
-campaignRoutes.get("/ai-costs/model-prices", asyncHandler(aiModelPricesController));
-campaignRoutes.post("/ai-costs/model-prices", asyncHandler(saveAiModelPriceController));
-campaignRoutes.post("/ai-costs/recalculate", asyncHandler(recalculateAiUsageController));
-campaignRoutes.get("/ai-costs/settings", asyncHandler(aiCostSettingsController));
-campaignRoutes.put("/ai-costs/settings", asyncHandler(saveAiCostSettingsController));
+campaignRoutes.get("/ai-costs", requireManager, asyncHandler(aiCostDashboardController));
+campaignRoutes.get("/ai-costs/export/:format", requireManager, asyncHandler(exportAiUsageController));
+campaignRoutes.get("/ai-costs/usage/:id", requireManager, asyncHandler(aiUsageDetailController));
+campaignRoutes.get("/ai-costs/model-prices", requireManager, asyncHandler(aiModelPricesController));
+campaignRoutes.post("/ai-costs/model-prices", requireManager, asyncHandler(saveAiModelPriceController));
+campaignRoutes.post("/ai-costs/recalculate", requireManager, asyncHandler(recalculateAiUsageController));
+campaignRoutes.get("/ai-costs/settings", requireManager, asyncHandler(aiCostSettingsController));
+campaignRoutes.put("/ai-costs/settings", requireManager, asyncHandler(saveAiCostSettingsController));

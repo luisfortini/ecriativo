@@ -3,8 +3,11 @@ import path from "node:path";
 import { config } from "../config.js";
 import { all, get, run, transaction } from "../db/connection.js";
 import type { ClientAsset, ClientAssetType, ClientBrandAnalysis, ClientProfile } from "../types.js";
+import { getDatabaseRequestContext } from "../db/requestContext.js";
+import { AppError } from "../utils/errors.js";
 
 const clientFields = [
+  "country", "state", "city", "time_zone", "anniversary_date", "founding_year",
   "name",
   "segment",
   "business_description",
@@ -66,18 +69,30 @@ export async function getClient(id: number) {
 export async function createClient(payload: ClientPayload) {
   const name = payload.name?.trim();
   if (!name) throw new Error("Informe o nome do cliente.");
+  const organizationId = getDatabaseRequestContext()?.organizationId;
+  if (!organizationId) throw new AppError("Organizacao nao selecionada.", 403);
+  const quota = await get<{ max_clients: number; total: number }>(
+    `SELECT o.max_clients, (SELECT COUNT(*)::int FROM clients) total
+       FROM organizations o WHERE o.id = ?`,
+    [organizationId]
+  );
+  if (quota && Number(quota.total) >= Number(quota.max_clients)) {
+    throw new AppError(`O plano atual permite ate ${quota.max_clients} clientes.`, 409);
+  }
 
   const result = await run(
     `INSERT INTO clients (
         name, segment, business_description, target_audience, differentiators, brand_voice,
         positioning, color_palette, forbidden_colors, preferred_typography, visual_references,
         approved_styles, forbidden_styles, communication_restrictions, preferred_ctas,
-        segment_policies, strategic_notes, brand_memory_summary, site_url, instagram_url
+        segment_policies, strategic_notes, brand_memory_summary, site_url, instagram_url,
+        country, state, city, time_zone, anniversary_date, founding_year
       ) VALUES (
         @name, @segment, @business_description, @target_audience, @differentiators, @brand_voice,
         @positioning, @color_palette, @forbidden_colors, @preferred_typography, @visual_references,
         @approved_styles, @forbidden_styles, @communication_restrictions, @preferred_ctas,
-        @segment_policies, @strategic_notes, @brand_memory_summary, @site_url, @instagram_url
+        @segment_policies, @strategic_notes, @brand_memory_summary, @site_url, @instagram_url,
+        @country, @state, @city, COALESCE(@time_zone, 'America/Sao_Paulo'), @anniversary_date, @founding_year
       )`,
     cleanPayload(payload)
   );
@@ -87,6 +102,7 @@ export async function createClient(payload: ClientPayload) {
 
 export async function updateClient(id: number, payload: ClientPayload) {
   const assignments = clientFields
+    .filter((field) => payload[field] !== undefined)
     .filter((field) => field !== "name" || payload.name !== undefined)
     .map((field) => `${field} = @${field}`)
     .join(", ");

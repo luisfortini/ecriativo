@@ -172,3 +172,19 @@ A tela `Planejador` permite criar campanhas em massa por tema, periodo, clientes
 - `UPLOAD_FILES_DIR`: diretório persistente dos arquivos enviados.
 - `PLANNER_TIME_ZONE`: fuso usado pelo agendamento; padrão `America/Sao_Paulo`.
 - `FRONTEND_ORIGIN`: origem permitida no CORS.
+- `INITIAL_ORGANIZATION_NAME`: nome da empresa que receberá os dados existentes na primeira migração multiempresa.
+
+## SaaS multiempresa
+
+Cada usuário autenticado opera dentro de uma organização selecionada. Clientes, campanhas, planejamentos, filas, agentes, custos, configurações e notificações recebem `organization_id` e são protegidos por Row-Level Security no PostgreSQL.
+
+- A primeira migração cria uma organização e vincula os usuários existentes sem perder dados.
+- Proprietários e administradores podem adicionar membros pela tela `Empresa e equipe`.
+- Proprietários e administradores gerenciam agentes, planejamentos, fila, custos, configurações de WhatsApp e aprovações. Membros operam clientes e campanhas dentro da empresa selecionada.
+- Um usuário pode participar de várias empresas e alternar entre elas no menu lateral.
+- Novas empresas recebem configurações, preços e agentes próprios.
+- Imagens e uploads locais exigem autenticação e confirmação de propriedade da organização.
+
+Durante a migração, o sistema cria o papel operacional `ecriativo_tenant`, sem `SUPERUSER` e sem `BYPASSRLS`. Cada consulta da empresa assume esse papel quando a credencial de conexão possui privilégios elevados. O servidor verifica o acesso ao banco na inicialização. Prefira uma credencial PostgreSQL dedicada e mantenha `JWT_SECRET` exclusivo por ambiente.
+
+Para testar as permissões de gestão, execute `npm run test:tenant --workspace backend`. O teste de integração com RLS usa um PostgreSQL de staging isolado: configure `STAGING_DATABASE_URL` e execute `npm run smoke:improvements --workspace backend`.

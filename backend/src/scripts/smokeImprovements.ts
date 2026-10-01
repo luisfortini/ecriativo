@@ -1,4 +1,5 @@
 import dotenv from "dotenv";
+import bcrypt from "bcryptjs";
 import { Pool } from "pg";
 import type { CreativeBrief, CreativeOutput } from "../contracts/index.js";
 import type { PlannerPlan } from "../services/campaignPlannerService.js";
@@ -21,21 +22,28 @@ async function main() {
     const isolatedUrl = new URL(stagingUrl);
     isolatedUrl.searchParams.set("options", `-c search_path=${schema}`);
     process.env.DATABASE_URL = isolatedUrl.toString();
+    process.env.JWT_SECRET = process.env.JWT_SECRET?.trim() || "smoke-test-secret-with-at-least-32-characters";
     delete process.env.ADMIN_NAME;
     delete process.env.ADMIN_EMAIL;
     delete process.env.ADMIN_PASSWORD;
 
-    const [{ migrate }, db, costs, planner, campaigns, promptContext, zoned] = await Promise.all([
+    const [{ migrate }, db, costs, planner, campaigns, promptContext, zoned, auth] = await Promise.all([
       import("../db/migrate.js"),
       import("../db/connection.js"),
       import("../services/aiCostService.js"),
       import("../services/campaignPlannerService.js"),
       import("../services/campaignService.js"),
       import("../services/clientPromptContextService.js"),
-      import("../utils/zonedDateTime.js")
+      import("../utils/zonedDateTime.js"),
+      import("../services/authService.js")
     ]);
     applicationPool = db.pool;
     await migrate();
+    const primaryOrganization = await db.get<{ id: number }>("SELECT id FROM organizations ORDER BY id LIMIT 1");
+    assert(primaryOrganization, "A migracao deveria criar a organizacao inicial.");
+    let primaryClientId = 0;
+
+    await db.withOrganizationContext(Number(primaryOrganization.id), async () => {
 
     const timezonePlan: PlannerPlan = {
       id: 999,
@@ -79,6 +87,7 @@ async function main() {
 
     const clientInsert = await db.run("INSERT INTO clients (name, segment) VALUES (?, ?)", ["Cliente Smoke", "Testes"]);
     const clientId = Number(clientInsert.lastInsertRowid);
+    primaryClientId = clientId;
     const userInsert = await db.run(
       "INSERT INTO users (name, email, password_hash, role, active) VALUES (?, ?, ?, 'admin', TRUE)",
       ["Revisor Smoke", "smoke@example.test", "hash-de-teste"]
@@ -162,7 +171,78 @@ async function main() {
       `A navegação entre criativos não encontrou o item seguinte da lista: ${JSON.stringify({ firstCampaign, secondCampaign, navigation })}`
     );
 
-    console.log(JSON.stringify({ status: "ok", checks: ["fuso", "paleta", "custos", "planejador", "duplicação", "avaliações", "aprendizado", "navegação"] }));
+    });
+
+    const secondOrganization = await db.run("INSERT INTO organizations (name, slug) VALUES (?, ?)", ["Empresa isolada", `empresa-isolada-${Date.now()}`]);
+    const secondOrganizationId = Number(secondOrganization.lastInsertRowid);
+    await db.withOrganizationContext(secondOrganizationId, async () => {
+      const visibleClients = await db.all("SELECT id FROM clients");
+      assert(visibleClients.length === 0, "Uma nova empresa nao pode enxergar clientes da empresa inicial.");
+      const hiddenPrimaryClient = await db.get("SELECT id FROM clients WHERE id = ?", [primaryClientId]);
+      assert(!hiddenPrimaryClient, "A busca por ID nao pode revelar cliente de outra empresa.");
+      let crossTenantReferenceBlocked = false;
+      try {
+        await db.transaction(async (client) => {
+          await db.run("INSERT INTO client_assets (client_id, type, file_url) VALUES (?, 'reference_image', ?)", [primaryClientId, "https://example.test/vazamento.png"], client);
+        });
+      } catch {
+        crossTenantReferenceBlocked = true;
+      }
+      assert(crossTenantReferenceBlocked, "Uma referencia para cliente de outra empresa deveria ser bloqueada.");
+      await db.run("INSERT INTO clients (name, segment) VALUES (?, ?)", ["Cliente Smoke", "Outro tenant"]);
+    });
+    await db.withOrganizationContext(Number(primaryOrganization.id), async () => {
+      const visibleClients = await db.all("SELECT id FROM clients WHERE name = ?", ["Cliente Smoke"]);
+      assert(visibleClients.length === 1, "Dados da segunda empresa vazaram para a empresa inicial.");
+    });
+
+    await db.runWithOrganizationContext(secondOrganizationId, async () => {
+      const visibleClients = await db.all("SELECT id FROM clients WHERE name = ?", ["Cliente Smoke"]);
+      assert(visibleClients.length === 1, "A consulta avulsa perdeu o contexto da segunda empresa.");
+      const transactionClients = await db.transaction((client) => db.all("SELECT id FROM clients", undefined, client));
+      assert(transactionClients.length === 1, "A transacao perdeu o contexto da segunda empresa.");
+    });
+    await db.runWithOrganizationContext(Number(primaryOrganization.id), async () => {
+      const visibleClients = await db.all("SELECT id FROM clients WHERE name = ?", ["Cliente Smoke"]);
+      assert(visibleClients.length === 1, "A consulta avulsa misturou dados das empresas.");
+    });
+
+    const password = "SenhaForteDeTeste123";
+    const user = await db.run(
+      "INSERT INTO users (name, email, password_hash, role, active) VALUES (?, ?, ?, 'user', TRUE)",
+      ["Usuario multiempresa", "multiempresa@smoke.test", await bcrypt.hash(password, 12)]
+    );
+    const authUserId = Number(user.lastInsertRowid);
+    await db.run(
+      "INSERT INTO organization_members (organization_id, user_id, role, status, is_default) VALUES (?, ?, 'member', 'active', TRUE)",
+      [primaryOrganization.id, authUserId]
+    );
+    await db.run(
+      "INSERT INTO organization_members (organization_id, user_id, role, status, is_default) VALUES (?, ?, 'admin', 'active', FALSE)",
+      [secondOrganizationId, authUserId]
+    );
+    const session = await auth.login("multiempresa@smoke.test", password);
+    assert(session.user.organization.id === Number(primaryOrganization.id), "Login selecionou a empresa errada.");
+    const switched = await auth.switchOrganization(authUserId, secondOrganizationId);
+    assert(switched.user.organization.id === secondOrganizationId, "Troca de empresa nao selecionou a nova empresa.");
+    assert((await auth.authenticateToken(switched.token)).organizationRole === "admin", "Token nao refletiu o papel da empresa selecionada.");
+    let unauthorizedSwitchBlocked = false;
+    try {
+      await auth.switchOrganization(authUserId, secondOrganizationId + 1000);
+    } catch {
+      unauthorizedSwitchBlocked = true;
+    }
+    assert(unauthorizedSwitchBlocked, "Troca para empresa sem associacao deveria ser bloqueada.");
+    await db.run("UPDATE organization_members SET status = 'suspended' WHERE organization_id = ? AND user_id = ?", [secondOrganizationId, authUserId]);
+    let revokedSessionBlocked = false;
+    try {
+      await auth.authenticateToken(switched.token);
+    } catch {
+      revokedSessionBlocked = true;
+    }
+    assert(revokedSessionBlocked, "Sessao da empresa suspensa deveria ser invalidada.");
+
+    console.log(JSON.stringify({ status: "ok", checks: ["fuso", "paleta", "custos", "planejador", "duplicação", "avaliações", "aprendizado", "navegação", "isolamento multiempresa", "troca de empresa", "revogacao de acesso"] }));
   } finally {
     if (applicationPool) await applicationPool.end();
     await adminPool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);

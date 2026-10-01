@@ -38,6 +38,12 @@ export interface ClientAsset {
 }
 
 export interface ClientProfile extends ClientSummary {
+  country?: string | null;
+  state?: string | null;
+  city?: string | null;
+  time_zone?: string;
+  anniversary_date?: string | null;
+  founding_year?: string | null;
   business_description: string | null;
   target_audience: string | null;
   differentiators: string | null;
@@ -196,6 +202,27 @@ export interface AuthUser {
   name: string;
   email: string;
   role: "admin" | "user";
+  organizationRole: "owner" | "admin" | "member";
+  organization: AuthOrganization;
+  organizations: AuthOrganization[];
+}
+
+export interface AuthOrganization {
+  id: number;
+  name: string;
+  slug: string;
+  role: "owner" | "admin" | "member";
+  planCode: string;
+  billingStatus: string;
+}
+
+export interface OrganizationMember {
+  id: number;
+  name: string;
+  email: string;
+  role: "owner" | "admin" | "member";
+  status: "invited" | "active" | "suspended";
+  created_at: string;
 }
 
 export interface LoginResponse {
@@ -366,6 +393,7 @@ export interface AgentTestResult {
 }
 
 export interface CampaignPlan {
+  visual_selection?: import("./components/VisualLibrary").VisualSelection;
   id: number;
   name: string;
   theme: string;
