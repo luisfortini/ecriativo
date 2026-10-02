@@ -6,6 +6,7 @@ import sharp from "sharp";
 import { all, get, run, transaction } from "../db/connection.js";
 import { config } from "../config.js";
 import { AppError } from "../utils/errors.js";
+import { persistMediaPath } from "./mediaStorageService.js";
 
 export const visualSelectionSchema = z.object({
   products: z.enum(["none", "manual", "auto"]).default("none"),
@@ -74,6 +75,7 @@ export async function addPhoto(clientId: number, subjectId: number, filePath: st
       const count = await get<{ total: number }>("SELECT COUNT(*)::int total FROM visual_photos WHERE subject_id = ?", [subjectId], client);
       if (Number(count?.total) >= 12) throw new AppError("Limite de 12 fotos por item.", 422);
       await run("INSERT INTO visual_photos(client_id,subject_id,filename,caption,is_primary) VALUES(?,?,?,?,?)", [clientId, subjectId, filename, caption.slice(0, 500), !count?.total], client);
+      await persistMediaPath("uploads",target);
     });
   } catch (error) {
     await fs.unlink(target).catch(() => undefined);

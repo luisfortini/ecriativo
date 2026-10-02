@@ -5,6 +5,7 @@ import { all, get, run, transaction } from "../db/connection.js";
 import type { ClientAsset, ClientAssetType, ClientBrandAnalysis, ClientProfile } from "../types.js";
 import { getDatabaseRequestContext } from "../db/requestContext.js";
 import { AppError } from "../utils/errors.js";
+import { persistMediaPath } from "./mediaStorageService.js";
 
 const clientFields = [
   "country", "state", "city", "time_zone", "anniversary_date", "founding_year",
@@ -128,6 +129,8 @@ export async function addClientAsset(
 ) {
   const filename = path.basename(filePath);
   const fileUrl = `${config.publicBaseUrl}/uploads/${filename}`;
+  if(!await get("SELECT id FROM clients WHERE id=?",[clientId]))throw new AppError("Cliente não encontrado.",404);
+  await persistMediaPath("uploads",filePath);
   if (type === "logo_main") {
     const saved = await transaction(async (client) => {
       const owner = await get("SELECT id FROM clients WHERE id = ? FOR UPDATE", [clientId], client);

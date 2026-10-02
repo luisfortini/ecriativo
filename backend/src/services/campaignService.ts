@@ -24,6 +24,7 @@ import { sendCampaignCompletedAsync } from "./whatsappNotificationService.js";
 import { normalizeBriefing } from "./briefingNormalizerService.js";
 import { appendClientLearning, getClient, listClientAssets } from "./clientService.js";
 import { generateImage } from "./openaiService.js";
+import { persistMediaPath } from "./mediaStorageService.js";
 import { resolveVisuals, validateVisualReferences, visualSelectionSchema } from "./visualLibraryService.js";
 import { getActiveProfileDiagnostic, type ProfileDiagnosticRecord } from "./profileDiagnosticService.js";
 
@@ -34,6 +35,7 @@ export async function createCampaign(
 ) {
   const client = await getClient(input.client_id);
   if (!client) throw new Error("Cliente nao encontrado.");
+  if(referenceFilePath)await persistMediaPath("uploads",referenceFilePath);
 
   const assets = await listClientAssets(input.client_id);
   const selection = visualSelectionSchema.parse(input.visual_selection ?? {});

@@ -79,6 +79,23 @@ persistente em produção. Configure `GENERATED_FILES_DIR` e `UPLOAD_FILES_DIR`
 para caminhos montados em volume; o `docker-compose.yml` já inclui esses dois
 volumes.
 
+A partir da migração 013, imagens geradas, uploads e fotos da biblioteca também
+são armazenados no PostgreSQL, por organização. O backend serve essa cópia mesmo
+quando os arquivos locais desaparecem em uma atualização. Ao iniciar, copia
+para o banco os arquivos antigos que ainda encontrar. Para executar manualmente,
+use `npm run backfill:media --workspace backend` ou, no container de produção,
+`node dist/scripts/backfillMedia.js`.
+
+No EasyPanel, preserve os arquivos do container atual **antes da primeira
+implantação desta correção**. A nova versão só pode copiar arquivos que ainda
+existem: um container anterior já substituído precisa de volume ou backup para
+recuperação. Configure os volumes na aba Storage para os mesmos caminhos de
+`GENERATED_FILES_DIR` e `UPLOAD_FILES_DIR` (neste Dockerfile, normalmente
+`/app/backend/generated` e `/app/backend/uploads`). Copie o conteúdo antigo
+antes de montar um volume vazio, que pode ocultar os arquivos existentes.
+
+Documentação: [Storage no EasyPanel](https://easypanel.io/docs/services/app#storage).
+
 ## Migracao de SQLite para PostgreSQL
 
 1. Configure `DATABASE_URL` apontando para o PostgreSQL.
