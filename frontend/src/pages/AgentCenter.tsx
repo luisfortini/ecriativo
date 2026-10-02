@@ -215,7 +215,7 @@ export function AgentCenter() {
                   <Copy size={15} />
                   Duplicar agente
                 </button>
-                <button className="inline-flex items-center gap-2 rounded-md bg-accent px-3 py-2 text-sm font-semibold text-white" disabled={saving}>
+                <button className="btn-primary" disabled={saving}>
                   <Save size={15} />
                   {saving ? "Salvando..." : "Salvar nova versão"}
                 </button>
@@ -340,7 +340,7 @@ function TestPanel(props: {
           </select>
         </div>
         <div className="flex items-end">
-          <button className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-brand px-4 py-2 text-sm font-semibold text-white" type="button" onClick={props.onRun}>
+          <button className="btn-primary w-full" type="button" onClick={props.onRun}>
             <Play size={15} />
             Testar agente
           </button>
@@ -390,7 +390,7 @@ function VersionPanel({ selected, compare, onRestore, onCompare }: { selected: A
                 <History size={14} />
                 Comparar
               </button>
-              <button className="inline-flex items-center gap-2 rounded-md bg-brand px-3 py-2 text-xs font-semibold text-white" type="button" onClick={() => onRestore(version.id)}>
+              <button className="btn-primary" type="button" onClick={() => onRestore(version.id)}>
                 <RotateCcw size={14} />
                 Restaurar versão
               </button>

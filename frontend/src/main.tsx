@@ -24,12 +24,13 @@ import { Login } from "./pages/Login";
 import { OrganizationSettings } from "./pages/OrganizationSettings";
 import { SocialMedia } from "./pages/SocialMedia";
 import "./styles.css";
+import { FeedbackProvider } from "./components/FeedbackProvider";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <ErrorBoundary>
       <BrowserRouter>
-        <AuthProvider>
+        <AuthProvider><FeedbackProvider>
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route element={<ProtectedRoute />}>
@@ -57,7 +58,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
               </Route>
             </Route>
           </Routes>
-        </AuthProvider>
+        </FeedbackProvider></AuthProvider>
       </BrowserRouter>
     </ErrorBoundary>
   </React.StrictMode>

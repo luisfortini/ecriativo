@@ -173,7 +173,7 @@ export function NewCampaignPlan() {
               ))}
             </div>
           </div>
-          <button className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-accent px-4 py-3 text-sm font-bold text-white" disabled={saving}>
+          <button className="btn-primary w-full" disabled={saving}>
             <Save size={16} />{saving ? "Salvando..." : editing ? "Salvar alterações" : "Salvar planejamento"}
           </button>
         </aside>

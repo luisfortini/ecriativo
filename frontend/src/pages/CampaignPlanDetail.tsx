@@ -92,7 +92,7 @@ export function CampaignPlanDetail() {
           <Link className="inline-flex items-center gap-2 rounded-md bg-brand px-3 py-2 text-sm font-semibold text-white" to={`/planejador/${plan.id}/editar`}><Pencil size={15} />Editar planejamento</Link>
         )}
         {plan.status === "active" && (
-          <button className="inline-flex items-center gap-2 rounded-md bg-brand px-3 py-2 text-sm font-semibold text-white disabled:opacity-60" type="button" disabled={pendingAction !== null} onClick={() => void pauseAndEdit()}><Pause size={15} />{pendingAction === "pause" ? "Pausando..." : "Pausar e editar"}</button>
+          <button className="btn-primary" type="button" disabled={pendingAction !== null} onClick={() => void pauseAndEdit()}><Pause size={15} />{pendingAction === "pause" ? "Pausando..." : "Pausar e editar"}</button>
         )}
         <button className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 disabled:opacity-60" type="button" disabled={pendingAction !== null} onClick={() => void duplicate()}><Copy size={15} />{pendingAction === "duplicate" ? "Duplicando..." : "Duplicar"}</button>
         <Action icon={<Play size={15} />} label="Ativar" action="activate" pendingAction={pendingAction} completedAction={completedAction} onClick={() => action("activate")} />

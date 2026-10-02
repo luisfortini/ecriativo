@@ -310,7 +310,7 @@ export function ClientProfilePage() {
                 <TextField key={field} field={field as keyof typeof fields} value={form[field as keyof typeof fields]} onChange={setForm} />
               ))}
             </div>
-            <button className="mt-5 inline-flex items-center gap-2 rounded-md bg-brand px-4 py-2 text-sm font-semibold text-white" disabled={saving}>
+            <button className="btn-primary mt-5" disabled={saving}>
               <Save size={16} />
               {saving ? "Salvando..." : "Salvar perfil"}
             </button>
@@ -332,7 +332,7 @@ export function ClientProfilePage() {
                 {assetFile ? assetFile.name : "Enviar arquivo"}
                 <input className="sr-only" type="file" accept="image/*,.pdf" onChange={(event) => setAssetFile(event.target.files?.[0] ?? null)} />
               </label>
-              <button className="mt-3 w-full rounded-md bg-accent px-4 py-2 text-sm font-semibold text-white" disabled={!assetFile}>
+              <button className="btn-primary mt-3 w-full" disabled={!assetFile}>
                 Adicionar arquivo
               </button>
             </form>
@@ -360,7 +360,7 @@ function TextField(props: { field: keyof typeof fields; value: string; onChange:
   const label = fieldLabels[props.field];
   if (props.field === "anniversary_date") {
     const [month,day] = (props.value || "-").split("-");
-    return <div><label className="label">Aniversário da empresa</label><div className="flex gap-2"><input aria-label="Dia do aniversário" className="field" type="number" min={1} max={31} placeholder="Dia" value={day || ""} onChange={e=>props.onChange(current=>({...current,anniversary_date:`${month || ""}-${e.target.value ? e.target.value.padStart(2,"0") : ""}`}))}/><select aria-label="Mês do aniversário" className="field" value={month || ""} onChange={e=>props.onChange(current=>({...current,anniversary_date:`${e.target.value}-${day || ""}`}))}><option value="">Mês</option>{["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"].map((name,index)=><option key={name} value={String(index+1).padStart(2,"0")}>{name}</option>)}</select></div><button type="button" className="text-xs underline" onClick={()=>props.onChange(current=>({...current,anniversary_date:""}))}>Limpar data</button><p className="text-xs text-slate-500">O ano de fundação é opcional e permite calcular quantos anos a empresa completa.</p></div>;
+    return <div><label className="label">Aniversário da empresa</label><div className="flex gap-2"><input aria-label="Dia do aniversário" className="field" type="number" min={1} max={31} placeholder="Dia" value={day || ""} onChange={e=>props.onChange(current=>({...current,anniversary_date:`${month || ""}-${e.target.value ? e.target.value.padStart(2,"0") : ""}`}))}/><select aria-label="Mês do aniversário" className="field" value={month || ""} onChange={e=>props.onChange(current=>({...current,anniversary_date:`${e.target.value}-${day || ""}`}))}><option value="">Mês</option>{["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"].map((name,index)=><option key={name} value={String(index+1).padStart(2,"0")}>{name}</option>)}</select></div><button type="button" className="btn-secondary" onClick={()=>props.onChange(current=>({...current,anniversary_date:""}))}>Limpar data</button><p className="text-xs text-slate-500">O ano de fundação é opcional e permite calcular quantos anos a empresa completa.</p></div>;
   }
   const isLong = !["name", "segment", "color_palette", "forbidden_colors", "preferred_typography", "country", "state", "city", "time_zone", "founding_year"].includes(props.field);
   return (
@@ -414,7 +414,7 @@ function NotificationTab(props: {
         <Toggle label="Receber erros" checked={Boolean(props.form.receive_errors)} onChange={(value) => props.setForm((current) => ({ ...current, receive_errors: value }))} />
         <Toggle label="Receber resumo semanal" checked={Boolean(props.form.receive_weekly_summary)} onChange={(value) => props.setForm((current) => ({ ...current, receive_weekly_summary: value }))} />
       </div>
-      <button className="mt-5 rounded-md bg-brand px-4 py-2 text-sm font-semibold text-white" type="button" disabled={props.saving} onClick={props.onSave}>
+      <button className="btn-primary mt-5" type="button" disabled={props.saving} onClick={props.onSave}>
         {props.saving ? "Salvando..." : "Salvar notificações"}
       </button>
     </section>
@@ -476,7 +476,7 @@ function BrandAnalysisTab(props: {
           </div>
           <label className="label mt-4">Textos copiados da bio, legendas ou observações manuais</label>
           <textarea className="field min-h-28" value={props.manualNotes} onChange={(event) => props.setManualNotes(event.target.value)} />
-          <button className="mt-4 rounded-md bg-brand px-4 py-2 text-sm font-semibold text-white" type="button" onClick={props.onAnalyze} disabled={props.saving}>
+          <button className="btn-primary mt-4" type="button" onClick={props.onAnalyze} disabled={props.saving}>
             {props.saving ? "Analisando..." : "Analisar marca com IA"}
           </button>
         </div>
@@ -494,7 +494,7 @@ function BrandAnalysisTab(props: {
               <button className="rounded-md border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700" type="button" onClick={props.onReanalyze}>
                 Reanalisar materiais
               </button>
-              <button className="rounded-md bg-brand px-3 py-2 text-xs font-semibold text-white" type="button" onClick={props.onApplyAll}>
+              <button className="btn-primary" type="button" onClick={props.onApplyAll}>
                 Aplicar aprendizados do cliente
               </button>
             </div>
@@ -507,7 +507,7 @@ function BrandAnalysisTab(props: {
                 <div key={item.field} className="rounded-md border border-slate-200 p-4">
                   <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                     <p className="font-semibold text-ink">{item.label}</p>
-                    <button className="rounded-md bg-accent px-3 py-2 text-xs font-semibold text-white" type="button" onClick={() => props.onApply(item.field)}>
+                    <button className="btn-primary" type="button" onClick={() => props.onApply(item.field)}>
                       Aplicar
                     </button>
                   </div>
@@ -574,7 +574,7 @@ function BrandAnalysisTab(props: {
           {props.assetType === "logo_main" && (
             <p className="mt-2 text-xs text-slate-500">Envie um PNG com fundo transparente. A nova logo substituirá a logo principal atual.</p>
           )}
-          <button className="mt-3 w-full rounded-md bg-brand px-4 py-2 text-sm font-semibold text-white" disabled={!props.assetFile}>
+          <button className="btn-primary mt-3 w-full" disabled={!props.assetFile}>
             Enviar material
           </button>
         </form>

@@ -510,7 +510,7 @@ function PricesPanel({
                     </select>
                   </td>
                   <td className="px-3 py-2">
-                    <button className="inline-flex items-center gap-2 rounded-md bg-brand px-3 py-2 text-xs font-semibold text-white" type="button" onClick={() => saveRow(price.id)}>
+                    <button className="btn-primary" type="button" onClick={() => saveRow(price.id)}>
                       <Save size={14} /> Salvar
                     </button>
                   </td>
@@ -528,7 +528,7 @@ function PricesPanel({
         <Field label="Imagem" type="number" value={form.image_price} onChange={(value) => setForm((current) => ({ ...current, image_price: value }))} />
         <Select label="Moeda" value={form.currency} onChange={(value) => setForm((current) => ({ ...current, currency: value }))} options={[["USD", "USD"], ["BRL", "BRL"]]} />
         <Select label="Ativo" value={form.active} onChange={(value) => setForm((current) => ({ ...current, active: value }))} options={[["1", "Sim"], ["0", "Não"]]} />
-        <button className="mt-3 inline-flex items-center gap-2 rounded-md bg-brand px-3 py-2 text-sm font-semibold text-white"><Save size={15} /> Adicionar preço</button>
+        <button className="btn-primary mt-3"><Save size={15} /> Adicionar preço</button>
       </form>
       </div>
     </div>
@@ -556,7 +556,7 @@ function SettingsPanel({ settings, setSettings, onSave }: { settings: Record<str
         ))}
         <Select label="Ação ao ultrapassar limite" value={settings.ai_cost_limit_mode ?? "alert"} onChange={(value) => setSettings((current) => ({ ...current, ai_cost_limit_mode: value }))} options={[["alert", "Apenas alertar"], ["block", "Bloquear geração"]]} />
       </div>
-      <button className="mt-4 inline-flex items-center gap-2 rounded-md bg-brand px-3 py-2 text-sm font-semibold text-white" onClick={onSave}><Save size={15} /> Salvar configurações</button>
+      <button className="btn-primary mt-4" onClick={onSave}><Save size={15} /> Salvar configurações</button>
     </section>
   );
 }

@@ -49,7 +49,7 @@ export function Clients() {
 
   return (
     <>
-      <PageHeader title="Clientes" description="Perfis criativos com memória estratégica, visual, restrições e aprendizados por marca." />
+      <PageHeader title="Clientes e marcas" description="Guarde os dados e as fotos de cada marca. Eles serão reutilizados nos anúncios e conteúdos." />
       {error && <ErrorBanner message={error} />}
 
       <div className="grid gap-6 xl:grid-cols-[1fr_420px]">
@@ -93,7 +93,7 @@ export function Clients() {
             <Field label="Posicionamento" name="positioning" value={form.positioning} onChange={setForm} />
             <Field label="Paleta de cores" name="color_palette" value={form.color_palette} onChange={setForm} />
           </div>
-          <button className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-md bg-brand px-4 py-2 text-sm font-semibold text-white" disabled={saving}>
+          <button className="btn-primary mt-4 w-full" disabled={saving}>
             <Save size={16} />
             {saving ? "Salvando..." : "Criar perfil"}
           </button>
@@ -112,9 +112,10 @@ function Field(props: {
 }) {
   return (
     <div>
-      <label className="label">{props.label}</label>
+      <label className="label" htmlFor={`client-${props.name}`}>{props.label}</label>
       <input
         className="field"
+        id={`client-${props.name}`}
         required={props.required}
         value={props.value}
         onChange={(event) => props.onChange((current) => ({ ...current, [props.name]: event.target.value }))}

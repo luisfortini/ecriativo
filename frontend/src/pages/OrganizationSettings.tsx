@@ -77,7 +77,7 @@ export function OrganizationSettings() {
         <input className="field" type="email" placeholder="E-mail" value={member.email} onChange={(event) => setMember((current) => ({ ...current, email: event.target.value }))} required />
         <input className="field" type="password" placeholder="Senha inicial (novo usuário)" value={member.password} onChange={(event) => setMember((current) => ({ ...current, password: event.target.value }))} />
         <select className="field" value={member.role} onChange={(event) => setMember((current) => ({ ...current, role: event.target.value as "admin" | "member" }))}><option value="member">Membro</option><option value="admin">Administrador</option></select>
-        <button className="inline-flex items-center justify-center gap-2 rounded-md bg-brand px-4 py-2 text-sm font-semibold text-white md:col-span-2" type="submit"><UserPlus size={16} />Adicionar membro</button>
+        <button className="btn-primary" type="submit"><UserPlus size={16} />Adicionar membro</button>
       </form>}
     </section>
 
@@ -86,7 +86,7 @@ export function OrganizationSettings() {
       <p className="mb-4 text-sm text-slate-500">Cria um ambiente independente, sem compartilhar clientes, campanhas, custos ou configurações.</p>
       <form className="flex flex-col gap-3 sm:flex-row" onSubmit={createCompany}>
         <input className="field flex-1" placeholder="Nome da empresa" value={companyName} onChange={(event) => setCompanyName(event.target.value)} required minLength={2} />
-        <button className="inline-flex items-center justify-center gap-2 rounded-md bg-accent px-4 py-2 text-sm font-semibold text-white" type="submit"><Plus size={16} />Criar empresa</button>
+        <button className="btn-primary" type="submit"><Plus size={16} />Criar empresa</button>
       </form>
     </section>
   </>;

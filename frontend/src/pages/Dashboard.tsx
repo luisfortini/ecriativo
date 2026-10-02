@@ -24,12 +24,12 @@ export function Dashboard() {
   return (
     <>
       <PageHeader
-        title="Campanhas"
-        description="Acompanhe campanhas geradas por IA, copie decisões estratégicas e reabra resultados para reutilizar prompts."
+        title="Meus anúncios"
+        description="Crie anúncios para seus clientes e acompanhe os resultados. Abra um anúncio para revisar, baixar ou pedir ajustes."
         action={
           <Link className="inline-flex items-center gap-2 rounded-md bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-hover" to="/nova-campanha">
             <Plus size={16} />
-            Nova campanha
+            Criar anúncio
           </Link>
         }
       />

@@ -10,16 +10,16 @@ export default {
       colors: {
         ink: "#0d0a19",
         graphite: "#262238",
-        mist: "#f6f7fb",
+        mist: "#f5f7fa",
         brand: {
           DEFAULT: "#070021",
-          hover: "#12083e",
-          soft: "#f0eff8"
+          hover: "#17243b",
+          soft: "#edf1f6"
         },
         accent: {
           DEFAULT: "#070021",
-          hover: "#12083e",
-          soft: "#f0eff8"
+          hover: "#17243b",
+          soft: "#edf1f6"
         }
       }
     }

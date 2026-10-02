@@ -110,7 +110,7 @@ export function WhatsappSettings() {
         </div>
 
         <div className="mt-5 flex flex-wrap gap-2">
-          <button className="inline-flex items-center gap-2 rounded-md bg-brand px-4 py-2 text-sm font-semibold text-white" disabled={saving}><Save size={15} /> Salvar</button>
+          <button className="btn-primary" disabled={saving}><Save size={15} /> Salvar</button>
           <button className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold" type="button" onClick={runConnectionTest}>Testar conexão</button>
         </div>
       </form>
@@ -118,7 +118,7 @@ export function WhatsappSettings() {
       <section className="panel mt-5 p-5">
         <h2 className="mb-3 font-bold text-ink">Mensagem de teste</h2>
         <textarea className="field min-h-24" value={testMessage} onChange={(event) => setTestMessage(event.target.value)} />
-        <button className="mt-3 inline-flex items-center gap-2 rounded-md bg-accent px-4 py-2 text-sm font-semibold text-white" type="button" onClick={runMessageTest}>
+        <button className="btn-primary mt-3" type="button" onClick={runMessageTest}>
           <Send size={15} /> Enviar mensagem de teste
         </button>
       </section>

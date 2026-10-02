@@ -10,7 +10,7 @@
 
   .hover\:bg-brand-hover:hover,
   .hover\:bg-accent-hover:hover {
-    background-color: #12083e;
+    background-color: #17243b;
   }
 
   .text-brand,
@@ -26,7 +26,7 @@
 
   .bg-brand-soft,
   .bg-accent-soft {
-    background-color: #f0eff8;
+    background-color: #edf1f6;
   }
 }
 
@@ -36,7 +36,7 @@
 
 body {
   margin: 0;
-  background: #f6f7fb;
+  background: #f5f7fa;
   color: #0d0a19;
 }
 
@@ -48,13 +48,41 @@ select {
 }
 
 .field {
-  @apply w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-ink outline-none transition focus:border-brand focus:ring-2 focus:ring-brand/20;
+  @apply w-full rounded-xl border border-slate-300 bg-white px-3 py-3 text-base text-ink transition focus:border-brand focus:ring-2 focus:ring-brand/20;
 }
 
 .label {
-  @apply mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600;
+  @apply mb-2 block text-sm font-medium text-slate-700;
 }
 
 .panel {
-  @apply rounded-lg border border-slate-200 bg-white shadow-sm shadow-brand/5;
+  @apply rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-900/5;
+}
+
+@layer base {
+  button { @apply transition disabled:cursor-not-allowed disabled:opacity-50; }
+  button:not([class]), button[class=""], button.underline {
+    @apply rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-brand no-underline hover:bg-slate-100;
+  }
+  button:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px solid #74849b; outline-offset: 3px; }
+  input[type="checkbox"], input[type="radio"] { accent-color: #070021; }
+  summary { @apply py-2; }
+}
+
+@layer components {
+  .btn-primary { @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-white hover:bg-brand-hover disabled:opacity-50; }
+  .btn-secondary { @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-medium text-brand hover:bg-slate-100; }
+  .btn-danger { @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-800 hover:bg-red-100; }
+  .helper { @apply mt-2 text-sm leading-relaxed text-slate-600; }
+  .status-badge { @apply inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700; }
+  .action-bar { @apply sticky bottom-3 z-20 rounded-2xl border border-slate-200 bg-white p-4 shadow-lg shadow-slate-900/10; }
+}
+
+@media (pointer: coarse) {
+  button, select { min-height: 44px; }
+  input[type="checkbox"], input[type="radio"] { width: 20px; height: 20px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }

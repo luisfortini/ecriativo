@@ -57,7 +57,7 @@ export function CampaignQueue() {
                   <>
                     <button className="rounded-md border border-slate-300 px-3 py-2 text-xs" title="Notificar erro agora" onClick={() => notifyError(item)}><Bell size={14} /></button>
                     <button className="rounded-md border border-slate-300 px-3 py-2 text-xs" title="Reprocessar e notificar" onClick={() => reprocessAndNotify(item)}><RotateCcw size={14} /></button>
-                    <button className="rounded-md bg-brand px-3 py-2 text-xs text-white" title="Reprocessar" onClick={() => reprocess(item.id)}><RotateCcw size={14} /></button>
+                    <button className="btn-primary" title="Reprocessar" onClick={() => reprocess(item.id)}><RotateCcw size={14} /></button>
                   </>
                 )}
               </div>

@@ -72,7 +72,7 @@ export function Login() {
             />
           </div>
           <button
-            className="w-full rounded-md bg-brand px-4 py-3 text-sm font-semibold text-white transition hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-60"
+            className="btn-primary w-full"
             disabled={submitting || loading}
             type="submit"
           >
