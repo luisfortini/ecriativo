@@ -9,6 +9,7 @@ import { authRoutes } from "./routes/authRoutes.js";
 import { campaignRoutes } from "./routes/campaignRoutes.js";
 import { contentRoutes } from "./routes/contentRoutes.js";
 import { startQueueWorker } from "./services/queueWorker.js";
+import { backfillPersistentMedia } from "./services/mediaStorageService.js";
 import { errorHandler } from "./utils/errors.js";
 import { asyncHandler } from "./utils/asyncHandler.js";
 import { generatedMediaController, uploadedMediaController } from "./controllers/mediaController.js";
@@ -71,6 +72,7 @@ async function bootstrap() {
   validateAuthConfig();
   await migrate();
   await validateTenantRole();
+  void backfillPersistentMedia().then(result=>console.log("Cópia persistente de mídias existentes:",result)).catch(error=>console.error("Falha na cópia de mídias existentes",error));
   const tasks = startQueueWorker();
   const server = app.listen(config.port, "0.0.0.0", () => {
     console.log(`e-Criativo API em http://0.0.0.0:${config.port}`);

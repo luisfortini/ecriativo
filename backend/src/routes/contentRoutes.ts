@@ -6,6 +6,7 @@ import { AppError } from "../utils/errors.js";
 import { requireOrganizationRole } from "../middleware/organizationRoleMiddleware.js";
 import { addPhoto, listSubjects, saveSubject, setPrimaryPhoto } from "../services/visualLibraryService.js";
 import { z } from "zod";
+import { requestEditorialCorrections } from "../services/editorialCorrectionService.js";
 import { contentAction, createEditorialBatch, editEditorialContent, getEditorialCalendar, listEditorialPlans, saveEditorialPlan } from "../services/editorialService.js";
 
 export const contentRoutes = Router();
@@ -16,6 +17,9 @@ contentRoutes.get("/social-media/plans",asyncHandler(async (_req,res) => {res.js
 contentRoutes.post("/social-media/plans",asyncHandler(async (req,res) => {res.status(201).json(await saveEditorialPlan(req.body));}));
 contentRoutes.put("/social-media/plans/:id",asyncHandler(async (req,res) => {res.json(await saveEditorialPlan(req.body,Number(req.params.id)));}));
 contentRoutes.get("/social-media/plans/:id/calendar",asyncHandler(async (req,res) => {res.json(await getEditorialCalendar(Number(req.params.id)));}));
+contentRoutes.post("/social-media/plans/:id/corrections",asyncHandler(async (req,res) => {
+  res.status(202).json(await requestEditorialCorrections(Number(req.params.id),req.body));
+}));
 contentRoutes.post("/social-media/plans/:id/batches",asyncHandler(async (req,res) => {
   const input = z.object({week_start:z.string().date().optional(),retry:z.boolean().default(false)}).safeParse(req.body);
   if(!input.success) throw new AppError("Semana inválida.",422);

@@ -8,6 +8,8 @@
 4. Na campanha, escolha nenhum, seleção automática ou seleção manual de produtos/pessoas. A opção “Não incluir pessoas” também proíbe pessoas genéricas no prompt. O plano recorrente permite seleção automática por cliente.
 5. Em **Social media**, defina cliente, quantidade semanal, pilares, formatos, limite de imagens e modo assistido/automático. Ative o plano para permitir a produção. Planos novos começam pausados.
 6. Revise as pautas, edite os textos, produza, aprove/reprove, copie a legenda e baixe as artes. Refazer exige orientação e mantém a versão anterior no histórico de dados.
+7. Para corrigir imagens, marque as artes desejadas em um ou mais conteúdos do plano, descreva o ajuste em **Solicitar correção de imagens** e aplique. Funciona para artes com falha, em revisão, reprovadas ou aprovadas, inclusive de semanas anteriores. Só as selecionadas são produzidas; a legenda e as outras artes são preservadas.
+8. Uma correção usa a imagem atual como referência, quando disponível e compatível com o modo visual. Se o arquivo antigo já foi perdido, usa o prompt e os materiais autorizados. Em colagem, o fundo é refeito e as fotos originais são reaplicadas.
 
 ## Produção e segurança
 
@@ -16,7 +18,10 @@
 - Sem pesquisa confiável, usa pilares e o aniversário informado, sinalizando indisponibilidade. Não inventa feriados para preencher o calendário.
 - O worker executa a cada minuto enquanto o backend está ligado. A reserva de produção é atômica; lotes semanais são únicos e imagens já persistidas não são repetidas na retomada.
 - O limite é por plano/semana, contando chamadas de imagem, inclusive tentativas com erro. Carrossel usa três artes. Não é um teto monetário global; texto, pesquisa e taxas do provedor também custam. O registro atual de custos de texto não inclui a tarifa da ferramenta web.
+- Para corrigir um lote sem saldo, aumente o limite no plano: o novo limite também vale para os lotes existentes. Uma correção parcialmente concluída guarda as artes já corrigidas para a retomada não repeti-las.
 - Fotos são privadas por organização. A seleção exige vínculo com o cliente, aprovação, autorização para a finalidade e validade. Autorizações são revalidadas antes de cada nova chamada de imagem; pausar não desfaz uma chamada já enviada ao provedor.
+- A migração 013 guarda os bytes de imagens e uploads no PostgreSQL com isolamento por organização. Os diretórios locais funcionam como cache. As versões anteriores continuam autenticadas e acessíveis mesmo após uma correção. Backups do banco passam a incluir os arquivos.
+- Imagens antigas só podem ser copiadas se ainda estiverem no disco, num volume ou num backup. Antes da primeira implantação no EasyPanel, preserve as pastas do container atual; a nova versão copia automaticamente os arquivos acessíveis e registra quantos já estavam ausentes.
 - Tentativas interrompidas por mais de 30 minutos viram falha para revisão manual, sem repetição paga silenciosa. Retomadas preservam referências já usadas. Refazer com ajustes cria nova versão e nova seleção autorizada.
 - Conteúdos produzidos ficam em revisão. A implementação não publica nas redes, não cria campanhas pagas nas plataformas e não autoriza gasto em mídia.
 

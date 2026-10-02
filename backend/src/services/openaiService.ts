@@ -7,6 +7,8 @@ import path from "node:path";
 import { config } from "../config.js";
 import type { CampaignFormat, CreativeOutput, NormalizedBriefing, StrategyOutput } from "../types.js";
 import { recordAiUsage, type AiOperationType } from "./aiCostService.js";
+import { persistMedia, ensureMediaPath, readMedia } from "./mediaStorageService.js";
+import { AppError } from "../utils/errors.js";
 
 const strategySchema = {
   type: "object",
@@ -118,19 +120,25 @@ export async function generateImage(
   prompt: string,
   format: CampaignFormat,
   metadata?: { clientId?: number | null; campaignId?: number | null; campaignPlanId?: number | null; queueId?: number | null; operationType?: AiOperationType },
-  visual?: { references: VisualReference[]; mode: "reference" | "composition"; no_people: boolean }
+  visual?: { references: VisualReference[]; mode: "reference" | "composition"; no_people: boolean; creative_filename?:string }
 ) {
-  if (!client && visual?.references.length) throw new Error("Configure a integração de imagens para usar fotos reais.");
+  if (!client && (visual?.references.length || visual?.creative_filename || metadata?.operationType==="rotina_agendada")) throw new Error("Configure a integração de imagens para gerar ou corrigir os criativos.");
   if (!client) return createLocalPlaceholder(prompt, format);
   const started = Date.now();
 
   try {
     const refs = visual?.references ?? [];
-    const visualPrompt = `${prompt}\n${visual?.no_people ? "Não incluir pessoas, rostos ou silhuetas humanas." : ""}\n${refs.map((ref, index) => `Referência ${index + 1}: ${ref.kind === "person" ? "pessoa" : "produto"} ${ref.name}. Preserve: ${ref.preservation_notes}`).join("\n")}`;
-    const response = refs.length && visual?.mode === "reference" ? await client.images.edit({
+    await Promise.all(refs.map(ref=>ensureMediaPath("uploads",ref.filename)));
+    let creative:Buffer|undefined;
+    if(visual?.creative_filename && (visual.mode==="reference" || !refs.length)) {
+      try {creative=await sharp((await readMedia("generated",visual.creative_filename)).data).png().toBuffer();}
+      catch(error) {if(!(error instanceof AppError && error.statusCode===404))throw error;}
+    }
+    const visualPrompt = `${prompt}\n${visual?.no_people ? "Não incluir pessoas, rostos ou silhuetas humanas." : ""}\n${refs.map((ref, index) => `Referência ${index + 1 + (creative ? 1 : 0)}: ${ref.kind === "person" ? "pessoa" : "produto"} ${ref.name}. Preserve: ${ref.preservation_notes}`).join("\n")}`;
+    const response = (creative || refs.length && visual?.mode === "reference") ? await client.images.edit({
       model: config.imageModel,
-      image: await Promise.all(refs.map(async ref => toFile(await fs.readFile(photoPath(ref.filename)), ref.filename, { type: "image/png" }))),
-      prompt: visualPrompt, size: imageSize(format), quality: "medium", n: 1
+      image: [...(creative ? [await toFile(creative,"arte-original.png",{type:"image/png"})] : []),...await Promise.all(refs.map(async ref => toFile(await fs.readFile(photoPath(ref.filename)), ref.filename, { type: "image/png" })))],
+      prompt: (creative ? "A primeira imagem é a arte atual a ser corrigida. Preserve o restante da composição e aplique somente os ajustes solicitados. As outras imagens são referências obrigatórias de produtos e pessoas.\n" : "")+visualPrompt, size: imageSize(format), quality: "medium", n: 1
     }) : await client.images.generate({
       model: config.imageModel,
       prompt: visual?.mode === "composition" && refs.length ? `${prompt}\nCrie apenas um fundo, sem produtos, pessoas, textos ou logos. As fotos reais serão aplicadas depois.` : visualPrompt,
@@ -174,7 +182,12 @@ export async function generateImage(
       return { ...(await saveGeneratedImage(buffer, "png")), aiUsageLogId };
     }
 
-    if (image?.url && !refs.length) return { imagePath: null, imageUrl: image.url, aiUsageLogId };
+    if (image?.url && !refs.length) {
+      const remote=await fetch(image.url,{signal:AbortSignal.timeout(15000)});
+      if(!remote.ok)throw new Error("Não foi possível armazenar a imagem retornada pelo provedor.");
+      const buffer=Buffer.from(await remote.arrayBuffer());
+      return {...(await saveGeneratedImage(buffer,"png")),aiUsageLogId};
+    }
 
     throw new Error("A geracao de imagem nao retornou arquivo ou URL.");
   } catch (error) {
@@ -208,6 +221,7 @@ async function saveGeneratedImage(buffer: Buffer, extension: "png" | "webp" | "j
   const filename = `${Date.now()}-${Math.random().toString(16).slice(2)}.${extension}`;
   const imagePath = path.join(dir, filename);
   await fs.writeFile(imagePath, buffer);
+  await persistMedia("generated",filename,buffer);
   return {
     imagePath,
     imageUrl: `${config.publicBaseUrl}/generated/${filename}`

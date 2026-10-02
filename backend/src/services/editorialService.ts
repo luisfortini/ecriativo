@@ -7,6 +7,8 @@ import { addDays, anniversaryInWeek, localDate, weekStart } from "./editorialCal
 import { researchEditorial, writeSocialContent, type EditorialEvidence } from "./editorialAiService.js";
 import { requireClient, resolveVisuals, validateVisualReferences, visualSelectionSchema, type VisualSelection, type VisualReference } from "./visualLibraryService.js";
 import { generateImage } from "./openaiService.js";
+import { mediaFilename } from "./mediaStorageService.js";
+import { requestEditorialCorrections, type CorrectionRequest } from "./editorialCorrectionService.js";
 
 export const editorialPlanSchema = z.object({
   client_id: z.coerce.number().int().positive(), name: z.string().trim().min(2).max(120),
@@ -88,14 +90,10 @@ export async function getEditorialCalendar(planId: number) {
 }
 
 export async function contentAction(id: number, action: string, note = "") {
-  const item = await get<{status:string; plan_id:number;active:boolean}>("SELECT c.status,b.plan_id,p.active FROM social_contents c JOIN editorial_batches b ON b.id=c.batch_id JOIN editorial_plans p ON p.id=b.plan_id WHERE c.id=?",[id]);
+  const item = await get<{status:string; plan_id:number;active:boolean;format:string}>("SELECT c.status,c.format,b.plan_id,p.active FROM social_contents c JOIN editorial_batches b ON b.id=c.batch_id JOIN editorial_plans p ON p.id=b.plan_id WHERE c.id=?",[id]);
   if (!item) throw new AppError("Conteúdo não encontrado.",404);
   if (action === "regenerate") {
-    if (!item.active || !["review","rejected"].includes(item.status) || note.trim().length < 3) throw new AppError("Para refazer, mantenha o plano ativo e informe os ajustes solicitados.",409);
-    const updated = await run(`UPDATE social_contents SET revisions=revisions || jsonb_build_array(jsonb_build_object('caption',caption,'images',images,'visual_snapshot',visual_snapshot,'review_note',review_note,'at',CURRENT_TIMESTAMP)),
-      topic=topic || E'\\nAjustes solicitados: ' || ?,status='pending',caption='',alt_text='',images='[]',image_prompts='[]',visual_snapshot='[]',review_note=?,error_message=NULL
-      WHERE id=? AND status=?`,[note.slice(0,2000),note.slice(0,2000),id,item.status]);
-    if (!updated.rowCount) throw new AppError("Conteúdo alterado por outra operação.",409);
+    await requestEditorialCorrections(Number(item.plan_id),{note,targets:[{content_id:id,image_indexes:item.format==="carousel"?[0,1,2]:[0]}]});
     return;
   }
   const allowed: Record<string,{from:string[];to:string}> = {generate:{from:["draft","failed","cancelled"],to:"pending"},approve:{from:["review"],to:"approved"},reject:{from:["review","approved"],to:"rejected"}};
@@ -136,7 +134,7 @@ async function processEditorialOrganization(engine:typeof defaultEngine) {
   }
   // Uma chamada interrompida precisa de decisão humana antes de voltar a gastar.
   await run("UPDATE social_contents SET status='failed',error_message='Execução interrompida. Revise antes de tentar novamente.' WHERE status='processing' AND started_at < CURRENT_TIMESTAMP - INTERVAL '30 minutes'");
-  const item = await transaction(async db => get<{id:number; client_id:number;batch_id:number;topic:string;format:string;image_prompts:string[];images:Array<{url:string;filename:string}>;sources:EditorialEvidence[];position:number;visual_snapshot:VisualReference[]}>(`WITH candidate AS (
+  const item = await transaction(async db => get<{id:number; client_id:number;batch_id:number;topic:string;format:string;image_prompts:string[];images:Array<{url:string;filename:string}>;sources:EditorialEvidence[];position:number;visual_snapshot:VisualReference[];correction_request:CorrectionRequest|null}>(`WITH candidate AS (
     SELECT c.id FROM social_contents c JOIN editorial_batches b ON b.id=c.batch_id JOIN editorial_plans p ON p.id=b.plan_id
     WHERE c.status='pending' AND p.active ORDER BY c.scheduled_date,c.id FOR UPDATE OF c SKIP LOCKED LIMIT 1
   ) UPDATE social_contents SET status='processing',started_at=CURRENT_TIMESTAMP,attempt_count=attempt_count+1 WHERE id IN(SELECT id FROM candidate) RETURNING *`,undefined,db));
@@ -147,7 +145,7 @@ async function processEditorialOrganization(engine:typeof defaultEngine) {
     const plan = batch.snapshot.plan;
     const client = await get<ClientProfile>("SELECT * FROM clients WHERE id=?",[item.client_id]);
     if (!client) throw new Error("Cliente não encontrado.");
-    if (localDate(new Date(),client.time_zone || "America/Sao_Paulo") > addDays(batch.week_start,6)) throw new Error("Semana encerrada. Crie um novo lote para não produzir conteúdo vencido.");
+    if (!item.correction_request && localDate(new Date(),client.time_zone || "America/Sao_Paulo") > addDays(batch.week_start,6)) throw new Error("Semana encerrada. Use solicitar correção para refazer as artes deste conteúdo.");
     const refs = item.image_prompts.length ? item.visual_snapshot : await resolveVisuals(Number(item.client_id),visualSelectionSchema.parse(plan.visual_selection),"social",item.position);
     await validateVisualReferences(Number(item.client_id),refs,"social");
     if (!item.image_prompts.length) {
@@ -155,16 +153,23 @@ async function processEditorialOrganization(engine:typeof defaultEngine) {
       item.image_prompts = content.image_prompts;
       await run("UPDATE social_contents SET caption=?,alt_text=?,image_prompts=?::jsonb,visual_snapshot=?::jsonb WHERE id=?",[content.caption,content.alt_text,JSON.stringify(content.image_prompts),JSON.stringify(refs),item.id]);
     }
-    for (let i=item.images.length;i<item.image_prompts.length;i++) {
-      const current = await get<{active:boolean}>("SELECT active FROM editorial_plans WHERE id=?",[plan.id]);
+    const indexes=item.correction_request ? item.correction_request.indexes.filter(i=>!item.correction_request!.completed.includes(i)) : item.image_prompts.map((_,i)=>i).filter(i=>!item.images[i]?.url);
+    for (const i of indexes) {
+      const current = await get<{active:boolean;weekly_image_limit:number}>("SELECT active,weekly_image_limit FROM editorial_plans WHERE id=?",[plan.id]);
       if (!current?.active) throw new Error("Plano pausado durante a produção. Nenhuma nova imagem foi solicitada.");
       await validateVisualReferences(Number(item.client_id),refs,"social");
-      const reserved = await run("UPDATE editorial_batches SET image_calls=image_calls+1 WHERE id=? AND image_calls < ?",[item.batch_id,plan.weekly_image_limit]);
+      const reserved = await run("UPDATE editorial_batches SET image_calls=image_calls+1 WHERE id=? AND image_calls < ?",[item.batch_id,current.weekly_image_limit]);
       if (!reserved.rowCount) throw new Error("Limite semanal de imagens atingido; tentativas também consomem o limite.");
-      const image = await engine.image(item.image_prompts[i],item.format === "story" ? "9:16":"4:5",{clientId:Number(item.client_id),operationType:"rotina_agendada"},{references:refs,mode:plan.visual_selection.mode,no_people:plan.visual_selection.no_people});
-      item.images.push({url:image.imageUrl,filename:image.imagePath ? path.basename(image.imagePath):""});
-      await run("UPDATE social_contents SET images=?::jsonb WHERE id=?",[JSON.stringify(item.images),item.id]);
+      const prompt=item.image_prompts[i]+(item.correction_request ? `\nCorreção solicitada exclusivamente nesta arte: ${item.correction_request.note}. Preserve a finalidade do conteúdo e as características obrigatórias dos produtos e pessoas.` : "");
+      const oldImage=item.images[i];
+      const creativeFilename=item.correction_request && oldImage?.url ? mediaFilename(oldImage.filename||oldImage.url) : undefined;
+      const image = await engine.image(prompt,item.format === "story" ? "9:16":"4:5",{clientId:Number(item.client_id),operationType:"rotina_agendada"},{references:refs,mode:plan.visual_selection.mode,no_people:plan.visual_selection.no_people,creative_filename:creativeFilename});
+      while(item.images.length<=i)item.images.push({url:"",filename:""});
+      item.images[i]={url:image.imageUrl,filename:image.imagePath ? path.basename(image.imagePath):""};
+      if(item.correction_request)item.correction_request.completed.push(i);
+      await run("UPDATE social_contents SET images=?::jsonb,correction_request=?::jsonb WHERE id=?",[JSON.stringify(item.images),JSON.stringify(item.correction_request),item.id]);
     }
-    await run("UPDATE social_contents SET status='review',error_message=NULL WHERE id=? AND status='processing'",[item.id]);
+    const missing=item.image_prompts.some((_,i)=>!item.images[i]?.url);
+    await run("UPDATE social_contents SET status=?,error_message=?,correction_request=NULL WHERE id=? AND status='processing'",[missing?"failed":"review",missing?"Ainda existem artes sem imagem. Selecione-as para solicitar correção.":null,item.id]);
   } catch(error) { await run("UPDATE social_contents SET status='failed',error_message=? WHERE id=?",[error instanceof Error ? error.message:"Falha na geração",item.id]); }
 }

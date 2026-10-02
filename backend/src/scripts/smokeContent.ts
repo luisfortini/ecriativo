@@ -22,12 +22,14 @@ async function main() {
     await admin.query(`CREATE SCHEMA "${schema}"`);
     const isolated=new URL(url);isolated.searchParams.set("options",`-c search_path=${schema}`);
     process.env.DATABASE_URL=isolated.toString();process.env.UPLOAD_FILES_DIR=temp;process.env.GENERATED_FILES_DIR=temp;
-    process.env.OPENAI_API_KEY="";process.env.JWT_SECRET="content-smoke-secret-at-least-32-characters";
+    process.env.OPENAI_API_KEY="fake-content-smoke-no-live-access";process.env.JWT_SECRET="content-smoke-secret-at-least-32-characters";
     process.env.ADMIN_NAME="";process.env.ADMIN_EMAIL="";process.env.ADMIN_PASSWORD="";
     const db=await import("../db/connection.js");pool=db.pool;
     const {migrate}=await import("../db/migrate.js");await migrate();await db.validateTenantRole();
     console.log("Estrutura temporária e isolamento validados.");
     const library=await import("../services/visualLibraryService.js");
+    const storage=await import("../services/mediaStorageService.js");
+    const corrections=await import("../services/editorialCorrectionService.js");
     const editorial=await import("../services/editorialService.js");
     const calendar=await import("../services/editorialCalendar.js");
     const clients=await import("../services/clientService.js");
@@ -65,17 +67,19 @@ async function main() {
     const {requireAuth}=await import("../middleware/authMiddleware.js");
     const {requireOrganization}=await import("../middleware/organizationMiddleware.js");
     const {contentRoutes}=await import("../routes/contentRoutes.js");
-    const {uploadedMediaController}=await import("../controllers/mediaController.js");
+    const {uploadedMediaController,generatedMediaController}=await import("../controllers/mediaController.js");
     const {asyncHandler}=await import("../utils/asyncHandler.js");
     const {errorHandler}=await import("../utils/errors.js");
     const userId=Number((await db.run("INSERT INTO users(name,email,password_hash,role,active) VALUES('Membro','member@test.invalid','unused','user',TRUE)")).lastInsertRowid);
     await db.run("INSERT INTO organization_members(organization_id,user_id,role,status) VALUES(?,?,'member','active')",[orgA,userId]);
-    const token=jwt.sign({organizationId:orgA},process.env.JWT_SECRET,{subject:String(userId),issuer:"e-criativo",audience:"e-criativo-web",expiresIn:60});
-    const app=express();app.use(express.json());app.use("/api",requireAuth,requireOrganization,contentRoutes);app.get("/uploads/:filename",requireAuth,requireOrganization,asyncHandler(uploadedMediaController));app.use(errorHandler);
+    const token=jwt.sign({organizationId:orgA},process.env.JWT_SECRET,{subject:String(userId),issuer:"e-criativo",audience:"e-criativo-web",expiresIn:600});
+    const app=express();app.use(express.json());app.use("/api",requireAuth,requireOrganization,contentRoutes);app.get("/uploads/:filename",requireAuth,requireOrganization,asyncHandler(uploadedMediaController));app.get("/generated/:filename",requireAuth,requireOrganization,asyncHandler(generatedMediaController));app.use(errorHandler);
     server=app.listen(0,"127.0.0.1");await new Promise<void>(resolve=>server!.once("listening",resolve));
     const address=server.address() as {port:number};const base=`http://127.0.0.1:${address.port}`;
     assert.equal((await fetch(`${base}/api/social-media/plans`,{headers:{Authorization:`Bearer ${token}`}})).status,403);
     assert.equal((await fetch(`${base}/uploads/${photo}`)).status,401);
+    assert.equal((await fetch(`${base}/uploads/${photo}`,{headers:{Authorization:`Bearer ${token}`}})).status,200);
+    await fs.unlink(path.join(temp,photo));
     assert.equal((await fetch(`${base}/uploads/${photo}`,{headers:{Authorization:`Bearer ${token}`}})).status,200);
     console.log("Acesso HTTP e mídia privada validados.");
     let generations=0;
@@ -95,6 +99,95 @@ async function main() {
       await assert.rejects(()=>library.resolveVisuals(clientId,selection,"social"));
       await assert.rejects(()=>library.validateVisualReferences(clientId,refs,"social"));
     });
+    let carouselId=0,correctionPlan=0,untouchedId=0;
+    const oldImages=[0,1,2].map(i=>({url:`https://old-host.invalid/generated/old-slide-${i}.png`,filename:`old-slide-${i}.png`}));
+    await db.runWithOrganizationContext(orgA,async()=>{
+      await db.run("UPDATE social_contents SET status='cancelled' WHERE id=?",[contentId]);
+      correctionPlan=(await editorial.saveEditorialPlan({client_id:clientId,name:"Correções",active:true,automatic:false,posts_per_week:2,pillars:["Educação"],formats:["carousel"],weekly_image_limit:10})).id;
+      const batch=await editorial.createEditorialBatch(correctionPlan,undefined,async()=>[]);
+      const items=await db.all<{id:number}>("SELECT id FROM social_contents WHERE batch_id=? ORDER BY position",[batch!.id]);
+      carouselId=Number(items[0].id);untouchedId=Number(items[1].id);
+      await db.run("UPDATE editorial_batches SET week_start=?,image_calls=3 WHERE id=?",[calendar.addDays(calendar.weekStart(today),-7),batch!.id]);
+      await db.run("UPDATE social_contents SET status='failed',caption='Preservar legenda',alt_text='Descrição original',image_prompts=?::jsonb,images=?::jsonb WHERE id=?",[JSON.stringify(["Arte um","Arte dois","Arte três"]),JSON.stringify(oldImages),carouselId]);
+      const bytes=await sharp({create:{width:256,height:256,channels:3,background:"#111188"}}).png().toBuffer();
+      for(const image of oldImages)await storage.persistMedia("generated",image.filename,bytes);
+      await assert.rejects(()=>corrections.requestEditorialCorrections(correctionPlan,{note:"Corrigir fundo",targets:[{content_id:carouselId,image_indexes:[1]},{content_id:99999999,image_indexes:[0]}]}));
+      assert.equal((await db.get<{status:string}>("SELECT status FROM social_contents WHERE id=?",[carouselId]))!.status,"failed");
+      await corrections.requestEditorialCorrections(correctionPlan,{note:"Fundo vermelho",targets:[{content_id:carouselId,image_indexes:[1]}]});
+    });
+    let correctionCalls=0;
+    await editorial.processEditorialQueue({research:async()=>[],write:async()=>{throw new Error("A correção não deve refazer texto.");},image:async(prompt,_format,_metadata,visual)=>{
+      assert.ok(prompt.includes("Fundo vermelho"));correctionCalls++;
+      assert.equal(visual?.creative_filename,"old-slide-1.png");
+      const bytes=await sharp({create:{width:256,height:256,channels:3,background:"#aa1111"}}).png().toBuffer();
+      await storage.persistMedia("generated","corrected-slide.png",bytes);
+      return {imagePath:path.join(temp,"corrected-slide.png"),imageUrl:"https://new-host.invalid/generated/corrected-slide.png",aiUsageLogId:1};
+    }});
+    assert.equal(correctionCalls,1);
+    await db.runWithOrganizationContext(orgA,async()=>{
+      const result=await db.get<{caption:string;alt_text:string;images:typeof oldImages;status:string;revisions:unknown[]}>("SELECT * FROM social_contents WHERE id=?",[carouselId]);
+      assert.equal(result!.status,"review");assert.equal(result!.caption,"Preservar legenda");assert.equal(result!.alt_text,"Descrição original");
+      assert.deepEqual(result!.images[0],oldImages[0]);assert.deepEqual(result!.images[2],oldImages[2]);assert.equal(result!.images[1].filename,"corrected-slide.png");assert.equal(result!.revisions.length,1);
+      assert.equal((await db.get<{status:string}>("SELECT status FROM social_contents WHERE id=?",[untouchedId]))!.status,"draft");
+      const restored=await storage.ensureMediaPath("generated","corrected-slide.png");assert.ok((await fs.stat(restored)).size);
+      await fs.unlink(restored);
+    });
+    assert.equal((await fetch(`${base}/generated/corrected-slide.png`,{headers:{Authorization:`Bearer ${token}`}})).status,200);
+    assert.equal((await fetch(`${base}/generated/old-slide-1.png`,{headers:{Authorization:`Bearer ${token}`}})).status,200);
+    await db.runWithOrganizationContext(orgA,()=>corrections.requestEditorialCorrections(correctionPlan,{note:"Ajuste parcial",targets:[{content_id:carouselId,image_indexes:[0,2]}]}));
+    let partialCalls=0;
+    await editorial.processEditorialQueue({research:async()=>[],write:async()=>{throw new Error("Não deve refazer texto");},image:async()=>{
+      partialCalls++;
+      if(partialCalls===2)throw new Error("Falha simulada na segunda correção.");
+      await storage.persistMedia("generated","partial-slide.png",Buffer.from("fixture"));
+      return {imagePath:path.join(temp,"partial-slide.png"),imageUrl:"https://test.invalid/generated/partial-slide.png",aiUsageLogId:1};
+    }});
+    await db.runWithOrganizationContext(orgA,async()=>{
+      const item=await db.get<{status:string;correction_request:{completed:number[]}}>("SELECT status,correction_request FROM social_contents WHERE id=?",[carouselId]);
+      assert.equal(item!.status,"failed");assert.deepEqual(item!.correction_request.completed,[0]);
+      await editorial.contentAction(carouselId,"generate");
+    });
+    let retryCalls=0;
+    await editorial.processEditorialQueue({research:async()=>[],write:async()=>{throw new Error("Não deve refazer texto");},image:async(prompt)=>{
+      retryCalls++;assert.ok(prompt.startsWith("Arte três"));
+      await storage.persistMedia("generated","retried-slide.png",Buffer.from("fixture"));
+      return {imagePath:path.join(temp,"retried-slide.png"),imageUrl:"https://test.invalid/generated/retried-slide.png",aiUsageLogId:1};
+    }});
+    assert.equal(partialCalls,2);assert.equal(retryCalls,1);
+    await db.runWithOrganizationContext(orgA,async()=>{
+      const item=await db.get<{status:string;images:typeof oldImages;caption:string}>("SELECT status,images,caption FROM social_contents WHERE id=?",[carouselId]);
+      assert.equal(item!.status,"review");assert.equal(item!.images[0].filename,"partial-slide.png");
+      assert.equal(item!.images[1].filename,"corrected-slide.png");assert.equal(item!.images[2].filename,"retried-slide.png");assert.equal(item!.caption,"Preservar legenda");
+    });
+    await db.runWithOrganizationContext(orgB,async()=>{
+      await assert.rejects(()=>storage.readMedia("generated","corrected-slide.png"));
+      await assert.rejects(()=>corrections.requestEditorialCorrections(correctionPlan,{note:"Tentativa externa",targets:[{content_id:carouselId,image_indexes:[1]}]}));
+    });
+    const legacyName="legacy-slide.png";
+    const legacyBytes=await sharp({create:{width:256,height:256,channels:3,background:"#114488"}}).png().toBuffer();
+    await fs.writeFile(path.join(temp,legacyName),legacyBytes);
+    await db.runWithOrganizationContext(orgA,()=>db.run("UPDATE social_contents SET images=?::jsonb WHERE id=?",[JSON.stringify([{url:`https://old-host.invalid/generated/${legacyName}`,filename:legacyName}]),untouchedId]));
+    const migrated=await storage.backfillPersistentMedia();assert.ok(migrated.saved>=1);
+    await fs.unlink(path.join(temp,legacyName));
+    assert.equal((await fetch(`${base}/generated/${legacyName}`,{headers:{Authorization:`Bearer ${token}`}})).status,200);
+    const {Images}=await import("openai/resources/images");
+    const originalEdit=Images.prototype.edit;
+    let editCalls=0;
+    Images.prototype.edit=((async(input:{image:Array<{arrayBuffer:()=>Promise<ArrayBuffer>}>;prompt:string})=>{
+      editCalls++;assert.equal(input.image.length,1);assert.ok(input.prompt.includes("primeira imagem"));
+      const inputBytes=Buffer.from(await input.image[0].arrayBuffer());assert.equal((await sharp(inputBytes).metadata()).width,256);
+      return {data:[{b64_json:legacyBytes.toString("base64")}]};
+    }) as unknown) as typeof originalEdit;
+    try {
+      await db.runWithOrganizationContext(orgA,async()=>{
+        const {generateImage}=await import("../services/openaiService.js");
+        const result=await generateImage("Corrigir somente o fundo","4:5",{clientId},{references:[],mode:"reference",no_people:true,creative_filename:legacyName});
+        assert.ok(result.imagePath);await fs.unlink(result.imagePath!);
+        assert.equal((await storage.readMedia("generated",path.basename(result.imagePath!))).content_type,"image/png");
+      });
+      assert.equal(editCalls,1);
+    } finally {Images.prototype.edit=originalEdit;}
+    console.log("Correção seletiva, legenda preservada, semana antiga, histórico e mídia sem disco validados.");
     console.log(JSON.stringify({status:"ok",checks:["localização e aniversário","biblioteca e imagens privadas","isolamento empresa e cliente","revogação de material","lote semanal idempotente","produção e aprovação","permissões HTTP"]}));
   } finally {
     if(server)await new Promise<void>(resolve=>server!.close(()=>resolve()));

@@ -5,6 +5,7 @@ import { config } from "../config.js";
 import type { BrandOverlayPosition } from "../contracts/index.js";
 import { get } from "../db/connection.js";
 import { recordCampaignPipelineEvent } from "./campaignPipelineService.js";
+import { persistMediaPath, ensureMediaPath } from "./mediaStorageService.js";
 
 const STEP_KEY = "brand_overlay";
 const SAFE_POSITIONS = new Set<BrandOverlayPosition>([
@@ -114,6 +115,7 @@ export async function applyBrandOverlay(input: BrandOverlayInput): Promise<Brand
       .composite([{ input: resizedLogo.data, left: position.left, top: position.top }])
       .png()
       .toFile(outputPath);
+    await persistMediaPath("generated",outputPath);
 
     const finalImageUrl = `${config.publicBaseUrl}/generated/${filename}`;
     await safeEvent(input, "overlay_applied", "info", "Logo principal aplicada com sucesso.", {
@@ -173,18 +175,7 @@ async function loadGeneratedImage(imagePath: string | null, imageUrl: string): P
 async function resolveUploadedAssetPath(fileUrl: string) {
   const filename = path.basename(new URL(fileUrl).pathname);
   const decodedFilename = decodeURIComponent(filename);
-  const uploadDirectories = Array.from(new Set([config.uploadFilesDir, path.resolve("uploads"), path.resolve("backend", "uploads")]));
-  for (const uploadsDir of uploadDirectories) {
-    const assetPath = path.resolve(uploadsDir, decodedFilename);
-    if (path.dirname(assetPath) !== uploadsDir) continue;
-    try {
-      await fs.access(assetPath);
-      return assetPath;
-    } catch {
-      // Tenta o diretorio usado pela outra forma de inicializacao do backend.
-    }
-  }
-  throw new Error("Arquivo da logo principal nao foi encontrado.");
+  return ensureMediaPath("uploads",decodedFilename);
 }
 
 async function safeEvent(
