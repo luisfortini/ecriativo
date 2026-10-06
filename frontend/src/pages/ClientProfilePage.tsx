@@ -2,6 +2,7 @@ import { ImageUp, Save } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ErrorBanner } from "../components/ErrorBanner";
+import { useResolveErrorFeedback } from "../components/FeedbackProvider";
 import { LoadingBlock } from "../components/LoadingBlock";
 import { PageHeader } from "../components/PageHeader";
 import { analyzeClientBrand, applyBrandAnalysis, getClient, getClientWhatsappSettings, reanalyzeClientMaterials, saveClientWhatsappSettings, updateClient, uploadClientAsset } from "../services/api";
@@ -86,8 +87,18 @@ const assetLabels: Record<ClientAssetType, string> = {
   brand_material: "Material da marca"
 };
 
+const pngSignature = [137, 80, 78, 71, 13, 10, 26, 10];
+
+async function validateAssetFile(type: ClientAssetType, file: File) {
+  if (type !== "logo_main") return "";
+  const signature = new Uint8Array(await file.slice(0, pngSignature.length).arrayBuffer());
+  const isPng = signature.length === pngSignature.length && pngSignature.every((byte, index) => signature[index] === byte);
+  return isPng ? "" : "A logo principal precisa ser um arquivo PNG com fundo transparente. Se sua logo estiver em JPG, exporte-a como PNG antes de enviar.";
+}
+
 export function ClientProfilePage() {
   const { id } = useParams();
+  const resolveErrorFeedback = useResolveErrorFeedback();
   const [client, setClient] = useState<ClientProfile | null>(null);
   const [form, setForm] = useState(fields);
   const [tab, setTab] = useState(tabs[0]);
@@ -95,6 +106,9 @@ export function ClientProfilePage() {
   const [assetFile, setAssetFile] = useState<File | null>(null);
   const [assetDescription, setAssetDescription] = useState("");
   const [assetFeedback, setAssetFeedback] = useState("");
+  const [assetError, setAssetError] = useState("");
+  const [assetSuccess, setAssetSuccess] = useState("");
+  const [uploadingAsset, setUploadingAsset] = useState(false);
   const [manualNotes, setManualNotes] = useState("");
   const [notificationForm, setNotificationForm] = useState(notificationDefaults);
   const [analysisResult, setAnalysisResult] = useState<{
@@ -138,17 +152,55 @@ export function ClientProfilePage() {
 
   async function sendAsset(event: FormEvent) {
     event.preventDefault();
-    if (!client || !assetFile) return;
+    if (!client || !assetFile || uploadingAsset) return;
+    if (assetError) resolveErrorFeedback(assetError);
+    setAssetError("");
+    setAssetSuccess("");
+    setError((current) => current === assetError ? "" : current);
+    const validationError = await validateAssetFile(assetType, assetFile);
+    if (validationError) {
+      setAssetError(validationError);
+      setError(validationError);
+      return;
+    }
     const data = new FormData();
     data.append("type", assetType);
     data.append("description", assetDescription);
     data.append("user_feedback", assetFeedback);
     data.append("file", assetFile);
-    await uploadClientAsset(client.id, data);
+    setUploadingAsset(true);
+    setError("");
+    try {
+      await uploadClientAsset(client.id, data);
+      setAssetFile(null);
+      setAssetDescription("");
+      setAssetFeedback("");
+      setAssetSuccess("Arquivo adicionado com sucesso.");
+      load();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Não foi possível adicionar o arquivo. Tente novamente.";
+      setAssetError(message);
+      setError(message);
+    } finally {
+      setUploadingAsset(false);
+    }
+  }
+
+  function changeAssetType(value: ClientAssetType) {
+    if (assetError) resolveErrorFeedback(assetError);
+    setAssetType(value);
     setAssetFile(null);
-    setAssetDescription("");
-    setAssetFeedback("");
-    load();
+    setAssetError("");
+    setAssetSuccess("");
+    setError((current) => current === assetError ? "" : current);
+  }
+
+  function changeAssetFile(file: File | null) {
+    if (assetError) resolveErrorFeedback(assetError);
+    setAssetFile(file);
+    setAssetError("");
+    setAssetSuccess("");
+    setError((current) => current === assetError ? "" : current);
   }
 
   async function runBrandAnalysis() {
@@ -284,13 +336,16 @@ export function ClientProfilePage() {
           onApplyAll={applyAllSuggestions}
           onReanalyze={runMaterialReanalysis}
           assetType={assetType}
-          setAssetType={setAssetType}
+          setAssetType={changeAssetType}
           assetDescription={assetDescription}
           setAssetDescription={setAssetDescription}
           assetFeedback={assetFeedback}
           setAssetFeedback={setAssetFeedback}
           assetFile={assetFile}
-          setAssetFile={setAssetFile}
+          setAssetFile={changeAssetFile}
+          assetError={assetError}
+          assetSuccess={assetSuccess}
+          uploadingAsset={uploadingAsset}
           onUpload={sendAsset}
         />
       ) : tab === "Notificações" ? (
@@ -322,7 +377,7 @@ export function ClientProfilePage() {
             <form className="panel p-5" onSubmit={sendAsset}>
               <h2 className="mb-4 font-bold text-ink">Arquivos da marca</h2>
               <label className="label">Tipo</label>
-              <select className="field mb-3" value={assetType} onChange={(event) => setAssetType(event.target.value as ClientAssetType)}>
+              <select className="field mb-3" value={assetType} onChange={(event) => changeAssetType(event.target.value as ClientAssetType)}>
                 {Object.entries(assetLabels).map(([value, label]) => (
                   <option key={value} value={value}>{label}</option>
                 ))}
@@ -332,10 +387,15 @@ export function ClientProfilePage() {
               <label className="flex cursor-pointer flex-col items-center gap-2 rounded-md border border-dashed border-slate-300 bg-slate-50 p-5 text-sm text-slate-600">
                 <ImageUp size={22} className="text-brand" />
                 {assetFile ? assetFile.name : "Enviar arquivo"}
-                <input className="sr-only" type="file" accept="image/*,.pdf" onChange={(event) => setAssetFile(event.target.files?.[0] ?? null)} />
+                <input className="sr-only" type="file" accept={assetType === "logo_main" ? "image/png,.png" : "image/*,.pdf"} onChange={(event) => changeAssetFile(event.target.files?.[0] ?? null)} />
               </label>
-              <button className="btn-primary mt-3 w-full" disabled={!assetFile}>
-                Adicionar arquivo
+              {assetType === "logo_main" && (
+                <p className="mt-2 text-xs text-slate-500">Formato obrigatório: PNG com fundo transparente. JPG não pode ser usado como logo principal.</p>
+              )}
+              {assetError && <p role="alert" className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{assetError}</p>}
+              {assetSuccess && <p role="status" className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">{assetSuccess}</p>}
+              <button className="btn-primary mt-3 w-full" disabled={!assetFile || uploadingAsset}>
+                {uploadingAsset ? "Adicionando..." : "Adicionar arquivo"}
               </button>
             </form>
 
@@ -457,6 +517,9 @@ function BrandAnalysisTab(props: {
   setAssetFeedback: (value: string) => void;
   assetFile: File | null;
   setAssetFile: (value: File | null) => void;
+  assetError: string;
+  assetSuccess: string;
+  uploadingAsset: boolean;
   onUpload: (event: FormEvent) => void;
 }) {
   const latest = props.analysisResult?.comparison ?? buildComparisonFromLatest(props.client);
@@ -575,10 +638,12 @@ function BrandAnalysisTab(props: {
             />
           </label>
           {props.assetType === "logo_main" && (
-            <p className="mt-2 text-xs text-slate-500">Envie um PNG com fundo transparente. A nova logo substituirá a logo principal atual.</p>
+            <p className="mt-2 text-xs text-slate-500">Formato obrigatório: PNG com fundo transparente. JPG não pode ser usado como logo principal. A nova logo substituirá a atual.</p>
           )}
-          <button className="btn-primary mt-3 w-full" disabled={!props.assetFile}>
-            Enviar material
+          {props.assetError && <p role="alert" className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{props.assetError}</p>}
+          {props.assetSuccess && <p role="status" className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">{props.assetSuccess}</p>}
+          <button className="btn-primary mt-3 w-full" disabled={!props.assetFile || props.uploadingAsset}>
+            {props.uploadingAsset ? "Enviando..." : "Enviar material"}
           </button>
         </form>
 
