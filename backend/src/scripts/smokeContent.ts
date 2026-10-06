@@ -41,9 +41,14 @@ async function main() {
     await db.runWithOrganizationContext(orgA,async()=>{
       const client=await clients.createClient({name:"Marca teste",country:"Brasil",state:"SP",city:"Campinas",anniversary_date:today.slice(5),time_zone:"America/Sao_Paulo",founding_year:"2010"});
       clientId=Number(client!.id);otherClientId=Number((await clients.createClient({name:"Outro cliente"}))!.id);
+      assert.equal((await clients.updateClient(clientId,{content_language:"English (US)"}))!.content_language,"English (US)");
+      assert.equal((await clients.updateClient(clientId,{content_language:""}))!.content_language,"");
+      await clients.updateClient(clientId,{content_language:"English (US)",color_palette:"Verde e branco",preferred_typography:"Serifada"});
       assert.equal(client!.city,"Campinas");
       subjectId=(await library.saveSubject(clientId,null,{kind:"product",name:"Produto real",approved:true,allow_ads:true,allow_social:true})).id;
       const fixture=path.join(temp,"fixture.png");await sharp({create:{width:512,height:512,channels:4,background:"#ee9922"}}).png().toFile(fixture);
+      const approvedUpload=path.join(temp,"approved-style-without-extension");await fs.writeFile(approvedUpload,await fs.readFile(fixture));
+      await clients.addClientAsset(clientId,"approved_reference",approvedUpload,"Referência visual aprovada");
       await library.addPhoto(clientId,subjectId,fixture,"Frente");
       const resolved=await library.resolveVisuals(clientId,selection,"social");assert.equal(resolved.length,1);photo=resolved[0].filename;
       await assert.rejects(()=>library.resolveVisuals(otherClientId,library.visualSelectionSchema.parse({products:"manual",product_ids:[subjectId]}),"ads"));
@@ -83,7 +88,7 @@ async function main() {
     assert.equal((await fetch(`${base}/uploads/${photo}`,{headers:{Authorization:`Bearer ${token}`}})).status,200);
     console.log("Acesso HTTP e mídia privada validados.");
     let generations=0;
-    await editorial.processEditorialQueue({research:async()=>[],write:async()=>({caption:"Legenda teste",alt_text:"Produto",image_prompts:["Produto em fundo limpo"]}),image:async()=>{generations++;return {imagePath:path.join(temp,"result.png"),imageUrl:"https://test.invalid/generated/result.png",aiUsageLogId:1};}});
+    await editorial.processEditorialQueue({research:async()=>[],write:async()=>({caption:"Legenda teste",alt_text:"Produto",image_prompts:["Produto em fundo limpo"]}),image:async(_prompt,_format,_metadata,visual)=>{generations++;assert.equal(visual?.style_filename,"approved-style-without-extension");assert.equal(visual?.style_kind,"uploads");return {imagePath:path.join(temp,"result.png"),imageUrl:"https://test.invalid/generated/result.png",aiUsageLogId:1};}});
     await editorial.processEditorialQueue({research:async()=>[],write:async()=>{throw new Error("Não deveria repetir");},image:async()=>{throw new Error("Não deveria repetir");}});
     assert.equal(generations,1);
     const whatsapp=await import("../services/whatsappNotificationService.js");
@@ -112,6 +117,7 @@ async function main() {
       const logged=await db.runWithOrganizationContext(orgA,()=>db.get<{status:string}>("SELECT status FROM notification_logs WHERE notification_type='social_content' ORDER BY id DESC LIMIT 1"));
       assert.equal(logged?.status,"sent");
     } finally {globalThis.fetch=originalFetch;}
+    console.log("Envio simulado e isolamento do WhatsApp validados.");
     await db.runWithOrganizationContext(orgA,async()=>{
       const item=await db.get<{status:string}>("SELECT status FROM social_contents WHERE id=?",[contentId]);assert.equal(item!.status,"review");
       await editorial.contentAction(contentId,"approve");
@@ -145,6 +151,8 @@ async function main() {
     await editorial.processEditorialQueue({research:async()=>[],write:async()=>{throw new Error("A correção não deve refazer texto.");},image:async(prompt,_format,_metadata,visual)=>{
       assert.ok(prompt.includes("Fundo vermelho"));correctionCalls++;
       assert.equal(visual?.creative_filename,"old-slide-1.png");
+      assert.equal(visual?.style_filename,"old-slide-0.png");assert.equal(visual?.social_layout,true);
+      assert.ok(prompt.includes("English (US)"));assert.ok(prompt.includes("Serifada"));
       const bytes=await sharp({create:{width:256,height:256,channels:3,background:"#aa1111"}}).png().toBuffer();
       await storage.persistMedia("generated","corrected-slide.png",bytes);
       return {imagePath:path.join(temp,"corrected-slide.png"),imageUrl:"https://new-host.invalid/generated/corrected-slide.png",aiUsageLogId:1};
@@ -175,11 +183,12 @@ async function main() {
     });
     let retryCalls=0;
     await editorial.processEditorialQueue({research:async()=>[],write:async()=>{throw new Error("Não deve refazer texto");},image:async(prompt)=>{
-      retryCalls++;assert.ok(prompt.startsWith("Arte três"));
+      retryCalls++;assert.ok(prompt.includes("Arte três"));
       await storage.persistMedia("generated","retried-slide.png",Buffer.from("fixture"));
       return {imagePath:path.join(temp,"retried-slide.png"),imageUrl:"https://test.invalid/generated/retried-slide.png",aiUsageLogId:1};
     }});
     assert.equal(partialCalls,2);assert.equal(retryCalls,1);
+    console.log("Referência entre slides e correção seletiva validadas.");
     await db.runWithOrganizationContext(orgA,async()=>{
       const item=await db.get<{status:string;images:typeof oldImages;caption:string}>("SELECT status,images,caption FROM social_contents WHERE id=?",[carouselId]);
       assert.equal(item!.status,"review");assert.equal(item!.images[0].filename,"partial-slide.png");
@@ -200,6 +209,32 @@ async function main() {
       assert.match(carouselMessages[0],/Preservar legenda/);
       assert.match(carouselMessages[2],/Arte 3 de 3/);
     } finally {globalThis.fetch=carouselFetch;}
+    await db.runWithOrganizationContext(orgA,async()=>{
+      await db.run("UPDATE editorial_plans SET weekly_image_limit=20 WHERE id=?",[correctionPlan]);
+      await assert.rejects(()=>corrections.requestEditorialCorrections(correctionPlan,{note:"Corrigir idioma",rewrite_text:true,targets:[{content_id:carouselId,image_indexes:[0]}]}),/todas as artes/);
+      await corrections.requestEditorialCorrections(correctionPlan,{note:"Refazer em inglês com identidade verde",rewrite_text:true,targets:[{content_id:carouselId,image_indexes:[0,1,2]}]});
+    });
+    let rewriteCalls=0,rewrittenImages=0,reviews=0;
+    const rewrittenEngine={research:async()=>[],write:async(client:import("../types.js").ClientProfile)=>{
+      rewriteCalls++;assert.equal(client.content_language,"English (US)");
+      return {caption:"English caption",alt_text:"English description",image_prompts:["First slide","Second slide","Third slide"],visual_direction:"Green, white and serif typography"};
+    },image:async(prompt:string,_format:unknown,_metadata:unknown,visual?:{creative_filename?:string;style_filename?:string})=>{
+      rewrittenImages++;assert.equal(visual?.creative_filename,undefined);assert.ok(prompt.includes("Green, white and serif typography"));
+      if(rewrittenImages===2)assert.equal(visual?.style_filename,"rewritten-1.png");
+      const filename=`rewritten-${rewrittenImages}.png`;await storage.persistMedia("generated",filename,testImage);
+      return {imagePath:path.join(temp,filename),imageUrl:`https://test.invalid/generated/${filename}`,aiUsageLogId:1};
+    },review:async()=>{reviews++;return {approved:reviews!==2,issues:reviews===2?["Texto em idioma incorreto."]:[]};}};
+    await editorial.processEditorialQueue(rewrittenEngine);
+    await db.runWithOrganizationContext(orgA,async()=>{
+      const item=await db.get<{status:string;caption:string;error_message:string}>("SELECT status,caption,error_message FROM social_contents WHERE id=?",[carouselId]);
+      assert.equal(item!.status,"failed");assert.equal(item!.caption,"English caption");assert.match(item!.error_message,/Arte 2/);
+      await assert.rejects(()=>editorial.contentAction(carouselId,"approve"));
+      await editorial.contentAction(carouselId,"generate");
+    });
+    await editorial.processEditorialQueue(rewrittenEngine);
+    assert.equal(rewriteCalls,1);assert.equal(rewrittenImages,4);
+    assert.equal((await db.runWithOrganizationContext(orgA,()=>db.get<{status:string}>("SELECT status FROM social_contents WHERE id=?",[carouselId])))!.status,"review");
+    console.log("Reescrita de idioma, bloqueio visual e retomada sem reescrever texto validados.");
     await db.runWithOrganizationContext(orgB,async()=>{
       await assert.rejects(()=>storage.readMedia("generated","corrected-slide.png"));
       await assert.rejects(()=>corrections.requestEditorialCorrections(correctionPlan,{note:"Tentativa externa",targets:[{content_id:carouselId,image_indexes:[1]}]}));
@@ -215,7 +250,8 @@ async function main() {
     const originalEdit=Images.prototype.edit;
     let editCalls=0;
     Images.prototype.edit=((async(input:{image:Array<{arrayBuffer:()=>Promise<ArrayBuffer>}>;prompt:string})=>{
-      editCalls++;assert.equal(input.image.length,1);assert.ok(input.prompt.includes("primeira imagem"));
+      editCalls++;assert.equal(input.image.length,editCalls===1?1:2);assert.ok(input.prompt.includes("primeira imagem"));
+      if(editCalls===2)assert.ok(input.prompt.includes("referência SOMENTE de identidade visual"));
       const inputBytes=Buffer.from(await input.image[0].arrayBuffer());assert.equal((await sharp(inputBytes).metadata()).width,256);
       return {data:[{b64_json:legacyBytes.toString("base64")}]};
     }) as unknown) as typeof originalEdit;
@@ -225,10 +261,17 @@ async function main() {
         const result=await generateImage("Corrigir somente o fundo","4:5",{clientId},{references:[],mode:"reference",no_people:true,creative_filename:legacyName});
         assert.ok(result.imagePath);await fs.unlink(result.imagePath!);
         assert.equal((await storage.readMedia("generated",path.basename(result.imagePath!))).content_type,"image/png");
+        const logoTile=await sharp({create:{width:40,height:20,channels:4,background:"#ff0000"}}).png().toBuffer();
+        const logoBytes=await sharp({create:{width:100,height:60,channels:4,background:{r:0,g:0,b:0,alpha:0}}}).composite([{input:logoTile,left:10,top:10}]).png().toBuffer();
+        await storage.persistMedia("uploads","official-logo.png",logoBytes);
+        const branded=await generateImage("Slide 2 em inglês","4:5",{clientId},{references:[],mode:"reference",no_people:true,creative_filename:legacyName,style_filename:legacyName,style_kind:"generated",social_layout:true,brand_logo_filename:"official-logo.png"});
+        const brandedBytes=(await storage.readMedia("generated",path.basename(branded.imagePath!))).data;
+        const pixel=await sharp(brandedBytes).extract({left:950,top:1250,width:1,height:1}).removeAlpha().raw().toBuffer();
+        assert.deepEqual([...pixel],[255,0,0]);await fs.unlink(branded.imagePath!);
       });
-      assert.equal(editCalls,1);
+      assert.equal(editCalls,2);
     } finally {Images.prototype.edit=originalEdit;}
-    console.log("Correção seletiva, legenda preservada, semana antiga, histórico e mídia sem disco validados.");
+    console.log("Correção seletiva, idioma, referência do carrossel, revisão visual e mídia sem disco validados.");
     console.log(JSON.stringify({status:"ok",checks:["localização e aniversário","biblioteca e imagens privadas","isolamento empresa e cliente","revogação de material","lote semanal idempotente","produção e aprovação","envio WhatsApp simulado","permissões HTTP"]}));
   } finally {
     if(server)await new Promise<void>(resolve=>server!.close(()=>resolve()));

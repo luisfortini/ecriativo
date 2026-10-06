@@ -9,6 +9,7 @@ import { validateMainLogoFile } from "../services/brandOverlayService.js";
 import { validAnniversary, validTimeZone } from "../services/editorialCalendar.js";
 
 const clientSchema = z.object({
+  content_language: z.string().trim().max(120).optional(),
   country: z.string().trim().max(80).optional(),
   state: z.string().trim().max(80).optional(),
   city: z.string().trim().max(120).optional(),

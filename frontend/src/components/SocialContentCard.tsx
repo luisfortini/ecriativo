@@ -5,7 +5,7 @@ import { MessageCircle } from "lucide-react";
 
 export interface SocialContent {
   id:number; batch_id:number; scheduled_date:string; format:string; topic:string; caption:string;
-  alt_text:string; status:string; error_message:string|null; images:Array<{url:string}>;
+  alt_text:string; status:string; error_message:string|null; images:Array<{url:string;quality_issues?:string[]}>;
   sources:Array<{title:string;url:string;date:string}>;
   revisions?:Array<{at:string;images:Array<{url:string}>}>;
 }

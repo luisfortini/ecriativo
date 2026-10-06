@@ -61,10 +61,11 @@ export function SocialMedia() {
   const [busy,setBusy]=useState(false);
   const [week,setWeek]=useState("");
   const [correctionNote,setCorrectionNote]=useState("");
+  const [rewriteText,setRewriteText]=useState(false);
   const [correctionError,setCorrectionError]=useState(false);
   const [selectedImages,setSelectedImages]=useState<Record<string,number[]>>({});
   const selectedCount=Object.values(selectedImages).reduce((total,indexes)=>total+indexes.length,0);
-  useEffect(()=>{setSelectedImages({});setCorrectionNote("");setCorrectionError(false);},[selected]);
+  useEffect(()=>{setSelectedImages({});setCorrectionNote("");setCorrectionError(false);setRewriteText(false);},[selected]);
   const load=()=>request<Plan[]>("/social-media/plans").then(data=>{setPlans(data);setSelected(current=>current??(data[0]?Number(data[0].id):null));});
   const refresh=async()=>{await load();if(selected)setCalendar(await request<Calendar>(`/social-media/plans/${selected}/calendar`));};
   useEffect(()=>{void Promise.all([load(),getClients().then(setClients)]).catch(e=>setError(e.message)).finally(()=>setLoading(false));},[]);
@@ -122,14 +123,16 @@ export function SocialMedia() {
             <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold">{selectedCount} arte{selectedCount>1?"s":""} selecionada{selectedCount>1?"s":""} para corrigir</h3><button type="button" className="btn-secondary" disabled={busy} onClick={()=>setSelectedImages({})}>Limpar seleção</button></div>
             <label className="label" htmlFor="social-correction-note">O que devemos corrigir?</label><textarea id="social-correction-note" className="field" rows={2} aria-invalid={correctionError} aria-describedby={correctionError?"social-correction-error":undefined} value={correctionNote} onChange={e=>{setCorrectionNote(e.target.value);setCorrectionError(false);}} placeholder="Ex.: manter a embalagem original e deixar o texto mais legível"/>
             {correctionError&&<p id="social-correction-error" role="alert" className="text-sm text-red-800">Descreva o que deve mudar antes de solicitar a correção.</p>}
-            <div className="flex flex-wrap items-center justify-between gap-3"><p className="text-xs text-slate-600">As outras artes e a legenda serão mantidas. Cada arte selecionada utiliza uma nova geração.</p><button type="button" disabled={busy||!calendar.plan.active} className="btn-primary" onClick={()=>{
+            <label className="flex items-start gap-2 text-sm"><input type="checkbox" disabled={busy} checked={rewriteText} onChange={event=>setRewriteText(event.target.checked)}/> Reescrever legenda e textos das artes no idioma atual do cliente</label>
+            <p className="helper">Para corrigir idioma ou refazer a identidade inteira, marque esta opção. Todas as artes dos conteúdos selecionados serão refeitas com o perfil atual do cliente, salvo em “Clientes e marcas” → “Tom de voz”.</p>
+            <div className="flex flex-wrap items-center justify-between gap-3"><p className="text-xs text-slate-600">{rewriteText?"Todas as artes dos conteúdos selecionados e suas legendas serão refeitas.":"As outras artes e a legenda serão mantidas."} Cada arte refeita utiliza uma nova geração.</p><button type="button" disabled={busy||!calendar.plan.active} className="btn-primary" onClick={()=>{
               if(correctionNote.trim().length<3){setCorrectionError(true);document.getElementById("social-correction-note")?.focus();return;}
               void perform(async()=>{
-                const targets=Object.entries(selectedImages).filter(([,indexes])=>indexes.length).map(([id,indexes])=>({content_id:Number(id),image_indexes:indexes}));
-                await request(`/social-media/plans/${selected}/corrections`,{method:"POST",...json({note:correctionNote,targets})});
-                setSelectedImages({});setCorrectionNote("");
+                const targets=Object.entries(selectedImages).filter(([,indexes])=>indexes.length).map(([id,indexes])=>({content_id:Number(id),image_indexes:rewriteText?Array.from({length:calendar.contents.find(item=>Number(item.id)===Number(id))?.format==="carousel"?3:1},(_,i)=>i):indexes}));
+                await request(`/social-media/plans/${selected}/corrections`,{method:"POST",...json({note:correctionNote,targets,rewrite_text:rewriteText})});
+                setSelectedImages({});setCorrectionNote("");setRewriteText(false);
               });
-            }}>{busy?"Enviando…":"Refazer artes selecionadas"}</button></div>
+            }}>{busy?"Enviando…":rewriteText?"Refazer conteúdos e textos":"Refazer artes selecionadas"}</button></div>
             {!calendar.plan.active&&<p className="text-sm text-amber-800">Este plano está pausado. Ative-o em “Configurar planos” para solicitar correções.</p>}
           </section>}
         </>}

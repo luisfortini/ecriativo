@@ -120,7 +120,7 @@ export async function generateImage(
   prompt: string,
   format: CampaignFormat,
   metadata?: { clientId?: number | null; campaignId?: number | null; campaignPlanId?: number | null; queueId?: number | null; operationType?: AiOperationType },
-  visual?: { references: VisualReference[]; mode: "reference" | "composition"; no_people: boolean; creative_filename?:string }
+  visual?: { references: VisualReference[]; mode: "reference" | "composition"; no_people: boolean; creative_filename?:string; style_filename?:string; style_kind?:"generated"|"uploads"; brand_logo_filename?:string; social_layout?:boolean }
 ) {
   if (!client && (visual?.references.length || visual?.creative_filename || metadata?.operationType==="rotina_agendada")) throw new Error("Configure a integração de imagens para gerar ou corrigir os criativos.");
   if (!client) return createLocalPlaceholder(prompt, format);
@@ -130,18 +130,24 @@ export async function generateImage(
     const refs = visual?.references ?? [];
     await Promise.all(refs.map(ref=>ensureMediaPath("uploads",ref.filename)));
     let creative:Buffer|undefined;
-    if(visual?.creative_filename && (visual.mode==="reference" || !refs.length)) {
+    if(visual?.creative_filename && (visual.social_layout || visual.mode==="reference" || !refs.length)) {
       try {creative=await sharp((await readMedia("generated",visual.creative_filename)).data).png().toBuffer();}
       catch(error) {if(!(error instanceof AppError && error.statusCode===404))throw error;}
     }
-    const visualPrompt = `${prompt}\n${visual?.no_people ? "Não incluir pessoas, rostos ou silhuetas humanas." : ""}\n${refs.map((ref, index) => `Referência ${index + 1 + (creative ? 1 : 0)}: ${ref.kind === "person" ? "pessoa" : "produto"} ${ref.name}. Preserve: ${ref.preservation_notes}`).join("\n")}`;
-    const response = (creative || refs.length && visual?.mode === "reference") ? await client.images.edit({
+    const style=visual?.style_filename ? await sharp((await readMedia(visual.style_kind||"generated",visual.style_filename)).data).png().toBuffer() : undefined;
+    const modelRefs=visual?.mode==="composition" && visual.social_layout ? [] : refs;
+    const compositionInstruction=visual?.mode==="composition" && refs.length && !creative
+      ? visual.social_layout ? "Crie o layout e os textos da arte; reserve a região central para as fotos reais, sem desenhar produtos ou pessoas. As fotos serão aplicadas pelo sistema." : "Crie apenas um fundo, sem produtos, pessoas, textos ou logos. As fotos reais serão aplicadas depois." : "";
+    const visualPrompt = `${prompt}\n${compositionInstruction}\n${visual?.no_people ? "Não incluir pessoas, rostos ou silhuetas humanas." : ""}\n${style ? `Imagem ${creative?2:1}: referência SOMENTE de identidade visual, cores, tipografia e margens. Não copie os textos nem as marcas presentes na referência. O perfil atual prevalece sobre a referência. Não desenhe logos, inclusive os presentes na imagem de referência; a logo oficial será aplicada depois.` : ""}\n${modelRefs.map((ref, index) => `Referência ${index + 1 + (creative ? 1 : 0) + (style?1:0)}: ${ref.kind === "person" ? "pessoa" : "produto"} ${ref.name}. Preserve: ${ref.preservation_notes}`).join("\n")}`;
+    const editInstruction=creative ? "A primeira imagem é a arte atual a ser corrigida. Aplique os ajustes solicitados e as regras atuais de marca e idioma. Preserve somente os elementos que já respeitam essas regras. Remova marcas estranhas ou logos geradas quando solicitado.\n" : "";
+    if((editInstruction+visualPrompt).length>32000)throw new Error("As regras da marca e a descrição da arte excedem o limite de geração. Simplifique os textos longos do perfil ou a pauta antes de tentar novamente.");
+    const response = (creative || style || refs.length && visual?.mode === "reference") ? await client.images.edit({
       model: config.imageModel,
-      image: [...(creative ? [await toFile(creative,"arte-original.png",{type:"image/png"})] : []),...await Promise.all(refs.map(async ref => toFile(await fs.readFile(photoPath(ref.filename)), ref.filename, { type: "image/png" })))],
-      prompt: (creative ? "A primeira imagem é a arte atual a ser corrigida. Preserve o restante da composição e aplique somente os ajustes solicitados. As outras imagens são referências obrigatórias de produtos e pessoas.\n" : "")+visualPrompt, size: imageSize(format), quality: "medium", n: 1
+      image: [...(creative ? [await toFile(creative,"arte-original.png",{type:"image/png"})] : []),...(style?[await toFile(style,"identidade-visual.png",{type:"image/png"})]:[]),...await Promise.all(modelRefs.map(async ref => toFile(await fs.readFile(photoPath(ref.filename)), ref.filename, { type: "image/png" })))],
+      prompt: editInstruction+visualPrompt, size: imageSize(format), quality: "medium", n: 1
     }) : await client.images.generate({
       model: config.imageModel,
-      prompt: visual?.mode === "composition" && refs.length ? `${prompt}\nCrie apenas um fundo, sem produtos, pessoas, textos ou logos. As fotos reais serão aplicadas depois.` : visualPrompt,
+      prompt: visualPrompt,
       size: imageSize(format),
       quality: "medium",
       n: 1
@@ -162,9 +168,11 @@ export async function generateImage(
     });
 
     const image = response.data?.[0];
-    if (image?.b64_json) {
-      let buffer = Buffer.from(image.b64_json, "base64");
-      if (visual?.mode === "composition" && refs.length) {
+    if (image?.b64_json || image?.url) {
+      const remote=image.b64_json ? undefined : await fetch(image.url!,{signal:AbortSignal.timeout(15000)});
+      if(remote && !remote.ok)throw new Error("Não foi possível armazenar a imagem retornada pelo provedor.");
+      let buffer = image.b64_json ? Buffer.from(image.b64_json, "base64") : Buffer.from(await remote!.arrayBuffer());
+      if (visual?.mode === "composition" && refs.length && !(creative && visual.social_layout)) {
         const unique = refs.filter((ref, index) => refs.findIndex(r => r.subject_id === ref.subject_id) === index);
         const width = 1024;
         const height = format === "4:5" ? 1280 : format === "9:16" ? 1824 : format === "16:9" ? 576 : 1024;
@@ -179,14 +187,18 @@ export async function generateImage(
         const dimensions = format === "9:16" ? [1080,1920] : format === "4:5" ? [1080,1350] : format === "16:9" ? [1920,1080] : [1080,1080];
         buffer = await sharp(buffer).resize(dimensions[0],dimensions[1],{fit:"contain",background:"#ffffff"}).png().toBuffer();
       }
+      if(visual?.social_layout && visual.brand_logo_filename) {
+        const logo=(await readMedia("uploads",visual.brand_logo_filename)).data;
+        const logoMeta=await sharp(logo).metadata();
+        const logoStats=await sharp(logo).stats();
+        if(logoMeta.format!=="png" || !logoMeta.hasAlpha || logoStats.isOpaque)throw new Error("A logo principal precisa ser PNG transparente para aplicar a marca nas artes.");
+        const base=await sharp(buffer).metadata();
+        const width=base.width!,height=base.height!,margin=Math.round(width*0.04);
+        const resized=await sharp(logo).trim().resize({width:Math.round(width*0.18),height:Math.round(height*0.1),fit:"inside"}).png().toBuffer();
+        const dimensions=await sharp(resized).metadata();
+        buffer=await sharp(buffer).composite([{input:resized,left:width-dimensions.width!-margin,top:height-dimensions.height!-margin}]).png().toBuffer();
+      }
       return { ...(await saveGeneratedImage(buffer, "png")), aiUsageLogId };
-    }
-
-    if (image?.url && !refs.length) {
-      const remote=await fetch(image.url,{signal:AbortSignal.timeout(15000)});
-      if(!remote.ok)throw new Error("Não foi possível armazenar a imagem retornada pelo provedor.");
-      const buffer=Buffer.from(await remote.arrayBuffer());
-      return {...(await saveGeneratedImage(buffer,"png")),aiUsageLogId};
     }
 
     throw new Error("A geracao de imagem nao retornou arquivo ou URL.");

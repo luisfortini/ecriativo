@@ -1,14 +1,16 @@
 import { z } from "zod";
 import path from "node:path";
+import sharp from "sharp";
 import { all, get, run, transaction, runWithOrganizationContext } from "../db/connection.js";
 import { AppError } from "../utils/errors.js";
 import type { ClientProfile } from "../types.js";
 import { addDays, anniversaryInWeek, localDate, weekStart } from "./editorialCalendar.js";
-import { researchEditorial, writeSocialContent, type EditorialEvidence } from "./editorialAiService.js";
+import { researchEditorial, writeSocialContent, reviewSocialImage, type EditorialEvidence } from "./editorialAiService.js";
 import { requireClient, resolveVisuals, validateVisualReferences, visualSelectionSchema, type VisualSelection, type VisualReference } from "./visualLibraryService.js";
 import { generateImage } from "./openaiService.js";
-import { mediaFilename } from "./mediaStorageService.js";
+import { mediaFilename, readMedia } from "./mediaStorageService.js";
 import { requestEditorialCorrections, type CorrectionRequest } from "./editorialCorrectionService.js";
+import { socialImagePrompt } from "./socialBrandContract.js";
 
 export const editorialPlanSchema = z.object({
   client_id: z.coerce.number().int().positive(), name: z.string().trim().min(2).max(120),
@@ -113,8 +115,9 @@ export async function editEditorialContent(id:number, raw:unknown) {
 }
 
 let running = false;
-const defaultEngine = {research:researchEditorial,write:writeSocialContent,image:generateImage};
-export async function processEditorialQueue(engine = defaultEngine) {
+const defaultEngine = {research:researchEditorial,write:writeSocialContent,image:generateImage,review:reviewSocialImage};
+type EditorialEngine = Omit<typeof defaultEngine,"review"> & Partial<Pick<typeof defaultEngine,"review">>;
+export async function processEditorialQueue(engine:EditorialEngine = defaultEngine) {
   if (running) return;
   running = true;
   try {
@@ -126,7 +129,7 @@ export async function processEditorialQueue(engine = defaultEngine) {
   } finally { running=false; }
 }
 
-async function processEditorialOrganization(engine:typeof defaultEngine) {
+async function processEditorialOrganization(engine:EditorialEngine) {
   const plans = await all<Plan>("SELECT * FROM editorial_plans WHERE active ORDER BY id");
   for (const plan of plans) {
     try { await createEditorialBatch(Number(plan.id),undefined,engine.research); }
@@ -134,7 +137,7 @@ async function processEditorialOrganization(engine:typeof defaultEngine) {
   }
   // Uma chamada interrompida precisa de decisão humana antes de voltar a gastar.
   await run("UPDATE social_contents SET status='failed',error_message='Execução interrompida. Revise antes de tentar novamente.' WHERE status='processing' AND started_at < CURRENT_TIMESTAMP - INTERVAL '30 minutes'");
-  const item = await transaction(async db => get<{id:number; client_id:number;batch_id:number;topic:string;format:string;image_prompts:string[];images:Array<{url:string;filename:string}>;sources:EditorialEvidence[];position:number;visual_snapshot:VisualReference[];correction_request:CorrectionRequest|null}>(`WITH candidate AS (
+  const item = await transaction(async db => get<{id:number; client_id:number;batch_id:number;topic:string;format:string;image_prompts:string[];images:Array<{url:string;filename:string;quality_issues?:string[]}>;sources:EditorialEvidence[];position:number;visual_snapshot:VisualReference[];visual_direction:string;correction_request:CorrectionRequest|null}>(`WITH candidate AS (
     SELECT c.id FROM social_contents c JOIN editorial_batches b ON b.id=c.batch_id JOIN editorial_plans p ON p.id=b.plan_id
     WHERE c.status='pending' AND p.active ORDER BY c.scheduled_date,c.id FOR UPDATE OF c SKIP LOCKED LIMIT 1
   ) UPDATE social_contents SET status='processing',started_at=CURRENT_TIMESTAMP,attempt_count=attempt_count+1 WHERE id IN(SELECT id FROM candidate) RETURNING *`,undefined,db));
@@ -148,28 +151,52 @@ async function processEditorialOrganization(engine:typeof defaultEngine) {
     if (!item.correction_request && localDate(new Date(),client.time_zone || "America/Sao_Paulo") > addDays(batch.week_start,6)) throw new Error("Semana encerrada. Use solicitar correção para refazer as artes deste conteúdo.");
     const refs = item.image_prompts.length ? item.visual_snapshot : await resolveVisuals(Number(item.client_id),visualSelectionSchema.parse(plan.visual_selection),"social",item.position);
     await validateVisualReferences(Number(item.client_id),refs,"social");
-    if (!item.image_prompts.length) {
-      const content = await engine.write(client,`${item.topic}\nMateriais autorizados: ${JSON.stringify(refs.map(r=>({name:r.name,kind:r.kind,preserve:r.preservation_notes})))}`,item.format,item.sources);
-      item.image_prompts = content.image_prompts;
-      await run("UPDATE social_contents SET caption=?,alt_text=?,image_prompts=?::jsonb,visual_snapshot=?::jsonb WHERE id=?",[content.caption,content.alt_text,JSON.stringify(content.image_prompts),JSON.stringify(refs),item.id]);
+    if(item.correction_request) {
+      for(const index of item.correction_request.indexes.filter(i=>!item.correction_request!.completed.includes(i))) {
+        if(item.images[index]?.url && !item.images[index].quality_issues?.length)item.images[index].quality_issues=["Esta versão aguarda a correção solicitada."];
+      }
+      await run("UPDATE social_contents SET images=?::jsonb WHERE id=?",[JSON.stringify(item.images),item.id]);
     }
-    const indexes=item.correction_request ? item.correction_request.indexes.filter(i=>!item.correction_request!.completed.includes(i)) : item.image_prompts.map((_,i)=>i).filter(i=>!item.images[i]?.url);
+    if (!item.image_prompts.length || (item.correction_request?.rewrite_text && !item.correction_request.text_updated)) {
+      const content = await engine.write(client,`${item.topic}\n${item.correction_request?.rewrite_text ? `Reescreva os textos no idioma atual do cliente. Ajustes: ${item.correction_request.note}` : ""}\nMateriais autorizados: ${JSON.stringify(refs.map(r=>({name:r.name,kind:r.kind,preserve:r.preservation_notes})))}`,item.format,item.sources);
+      item.image_prompts = content.image_prompts;
+      item.visual_direction = content.visual_direction || "";
+      if(item.correction_request?.rewrite_text)item.correction_request.text_updated=true;
+      await run("UPDATE social_contents SET caption=?,alt_text=?,image_prompts=?::jsonb,visual_snapshot=?::jsonb,visual_direction=?,correction_request=?::jsonb WHERE id=?",[content.caption,content.alt_text,JSON.stringify(content.image_prompts),JSON.stringify(refs),item.visual_direction,JSON.stringify(item.correction_request),item.id]);
+    }
+    const brandAssets = await all<{type:string;file_url:string}>("SELECT type,file_url FROM client_assets WHERE client_id=? AND type IN ('logo_main','approved_reference','approved_ad') ORDER BY id DESC",[item.client_id]);
+    const logo=brandAssets.find(asset=>asset.type==="logo_main");
+    let approvedStyle:typeof brandAssets[number]|undefined;
+    for(const asset of brandAssets.filter(asset=>asset.type!=="logo_main")) {
+      const stored=await readMedia("uploads",mediaFilename(asset.file_url));
+      const metadata=await sharp(stored.data).metadata().catch(()=>undefined);
+      if(metadata?.format && ["png","jpeg","webp"].includes(metadata.format)){approvedStyle=asset;break;}
+    }
+    const indexes=item.correction_request ? item.correction_request.indexes.filter(i=>!item.correction_request!.completed.includes(i)) : item.image_prompts.map((_,i)=>i).filter(i=>!item.images[i]?.url || Boolean(item.images[i]?.quality_issues?.length));
     for (const i of indexes) {
       const current = await get<{active:boolean;weekly_image_limit:number}>("SELECT active,weekly_image_limit FROM editorial_plans WHERE id=?",[plan.id]);
       if (!current?.active) throw new Error("Plano pausado durante a produção. Nenhuma nova imagem foi solicitada.");
       await validateVisualReferences(Number(item.client_id),refs,"social");
       const reserved = await run("UPDATE editorial_batches SET image_calls=image_calls+1 WHERE id=? AND image_calls < ?",[item.batch_id,current.weekly_image_limit]);
       if (!reserved.rowCount) throw new Error("Limite semanal de imagens atingido; tentativas também consomem o limite.");
-      const prompt=item.image_prompts[i]+(item.correction_request ? `\nCorreção solicitada exclusivamente nesta arte: ${item.correction_request.note}. Preserve a finalidade do conteúdo e as características obrigatórias dos produtos e pessoas.` : "");
+      const prompt=socialImagePrompt(client,item.image_prompts[i],i,item.image_prompts.length,item.visual_direction,item.correction_request?.note);
       const oldImage=item.images[i];
-      const creativeFilename=item.correction_request && oldImage?.url ? mediaFilename(oldImage.filename||oldImage.url) : undefined;
-      const image = await engine.image(prompt,item.format === "story" ? "9:16":"4:5",{clientId:Number(item.client_id),operationType:"rotina_agendada"},{references:refs,mode:plan.visual_selection.mode,no_people:plan.visual_selection.no_people,creative_filename:creativeFilename});
+      const creativeFilename=item.correction_request && !item.correction_request.rewrite_text && oldImage?.url ? mediaFilename(oldImage.filename||oldImage.url) : undefined;
+      const anchor=i>0 ? item.images[0] : undefined;
+      const image = await engine.image(prompt,item.format === "story" ? "9:16":"4:5",{clientId:Number(item.client_id),operationType:"rotina_agendada"},{references:refs,mode:plan.visual_selection.mode,no_people:plan.visual_selection.no_people,creative_filename:creativeFilename,style_filename:anchor?.url?mediaFilename(anchor.filename||anchor.url):approvedStyle?mediaFilename(approvedStyle.file_url):undefined,style_kind:anchor?.url?"generated":"uploads",brand_logo_filename:logo?mediaFilename(logo.file_url):undefined,social_layout:true});
       while(item.images.length<=i)item.images.push({url:"",filename:""});
-      item.images[i]={url:image.imageUrl,filename:image.imagePath ? path.basename(image.imagePath):""};
+      item.images[i]={url:image.imageUrl,filename:image.imagePath ? path.basename(image.imagePath):"",quality_issues:engine.review?["Revisão visual pendente."]:[]};
+      await run("UPDATE social_contents SET images=?::jsonb WHERE id=?",[JSON.stringify(item.images),item.id]);
+      if(engine.review){
+        const review=await engine.review(client,item.images[i].filename || mediaFilename(image.imageUrl),anchor?.url?mediaFilename(anchor.filename||anchor.url):undefined,logo?mediaFilename(logo.file_url):undefined);
+        item.images[i].quality_issues=review.approved?[]:review.issues.length?review.issues:["A arte não passou na revisão de marca e idioma."];
+        await run("UPDATE social_contents SET images=?::jsonb WHERE id=?",[JSON.stringify(item.images),item.id]);
+        if(!review.approved)throw new Error(`Arte ${i+1}: ${item.images[i].quality_issues!.join(" ")} Selecione esta arte para corrigir ou reescreva todo o conteúdo com o perfil atual.`);
+      }
       if(item.correction_request)item.correction_request.completed.push(i);
       await run("UPDATE social_contents SET images=?::jsonb,correction_request=?::jsonb WHERE id=?",[JSON.stringify(item.images),JSON.stringify(item.correction_request),item.id]);
     }
-    const missing=item.image_prompts.some((_,i)=>!item.images[i]?.url);
-    await run("UPDATE social_contents SET status=?,error_message=?,correction_request=NULL WHERE id=? AND status='processing'",[missing?"failed":"review",missing?"Ainda existem artes sem imagem. Selecione-as para solicitar correção.":null,item.id]);
+    const missing=item.image_prompts.some((_,i)=>!item.images[i]?.url || Boolean(item.images[i]?.quality_issues?.length));
+    await run("UPDATE social_contents SET status=?,error_message=?,correction_request=NULL WHERE id=? AND status='processing'",[missing?"failed":"review",missing?"Ainda existem artes ausentes ou reprovadas na revisão visual. Selecione-as para corrigir.":null,item.id]);
   } catch(error) { await run("UPDATE social_contents SET status='failed',error_message=? WHERE id=?",[error instanceof Error ? error.message:"Falha na geração",item.id]); }
 }

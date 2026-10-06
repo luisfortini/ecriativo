@@ -6,6 +6,7 @@ import {
 import bcrypt from "bcryptjs";
 import { contentMigration } from "./contentMigration.js";
 import { mediaCorrectionMigration } from "./mediaCorrectionMigration.js";
+import { socialBrandMigration } from "./socialBrandMigration.js";
 import { all, exec, get, run, withOrganizationContext } from "./connection.js";
 
 interface Migration {
@@ -845,7 +846,7 @@ export async function migrate() {
   await exec("CREATE TABLE IF NOT EXISTS schema_migrations (id TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP)");
   const appliedRows = await all<{ id: string }>("SELECT id FROM schema_migrations");
   const applied = new Set(appliedRows.map((row) => row.id));
-  for (const migration of [...migrations, contentMigration, mediaCorrectionMigration]) {
+  for (const migration of [...migrations, contentMigration, mediaCorrectionMigration, socialBrandMigration]) {
     if (applied.has(migration.id)) continue;
     await exec(migration.up);
     await run("INSERT INTO schema_migrations (id) VALUES (?)", [migration.id]);

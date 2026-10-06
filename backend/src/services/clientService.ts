@@ -8,6 +8,7 @@ import { AppError } from "../utils/errors.js";
 import { persistMediaPath } from "./mediaStorageService.js";
 
 const clientFields = [
+  "content_language",
   "country", "state", "city", "time_zone", "anniversary_date", "founding_year",
   "name",
   "segment",
@@ -87,13 +88,13 @@ export async function createClient(payload: ClientPayload) {
         positioning, color_palette, forbidden_colors, preferred_typography, visual_references,
         approved_styles, forbidden_styles, communication_restrictions, preferred_ctas,
         segment_policies, strategic_notes, brand_memory_summary, site_url, instagram_url,
-        country, state, city, time_zone, anniversary_date, founding_year
+        country, state, city, time_zone, anniversary_date, founding_year, content_language
       ) VALUES (
         @name, @segment, @business_description, @target_audience, @differentiators, @brand_voice,
         @positioning, @color_palette, @forbidden_colors, @preferred_typography, @visual_references,
         @approved_styles, @forbidden_styles, @communication_restrictions, @preferred_ctas,
         @segment_policies, @strategic_notes, @brand_memory_summary, @site_url, @instagram_url,
-        @country, @state, @city, COALESCE(@time_zone, 'America/Sao_Paulo'), @anniversary_date, @founding_year
+        @country, @state, @city, COALESCE(@time_zone, 'America/Sao_Paulo'), @anniversary_date, @founding_year, COALESCE(@content_language, '')
       )`,
     cleanPayload(payload)
   );
@@ -209,5 +210,5 @@ export async function appendClientLearning(clientId: number, field: keyof Client
 }
 
 function cleanPayload(payload: ClientPayload) {
-  return Object.fromEntries(clientFields.map((field) => [field, payload[field]?.trim() || null]));
+  return Object.fromEntries(clientFields.map((field) => [field, payload[field]?.trim() || (field === "content_language" ? "" : null)]));
 }

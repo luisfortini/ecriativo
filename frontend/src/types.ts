@@ -38,6 +38,7 @@ export interface ClientAsset {
 }
 
 export interface ClientProfile extends ClientSummary {
+  content_language?: string | null;
   country?: string | null;
   state?: string | null;
   city?: string | null;

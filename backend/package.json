@@ -12,7 +12,7 @@
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",
     "test:tenant": "tsx --test src/tests/organizationRole.test.ts src/tests/editorialCalendar.test.ts",
-    "test:editorial-output": "tsx --test src/tests/socialContentOutput.test.ts",
+    "test:editorial-output": "tsx --test src/tests/socialContentOutput.test.ts src/tests/socialBrandContract.test.ts",
     "smoke:content": "tsx src/scripts/smokeContent.ts",
     "backfill:media": "tsx src/scripts/backfillMedia.ts",
     "migrate-sqlite-to-postgres": "tsx src/scripts/migrateSqliteToPostgres.ts",

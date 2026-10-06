@@ -11,6 +11,7 @@ function contentSchema(format: string) {
   return z.object({
     caption: z.string().trim().min(1).max(SOCIAL_CONTENT_LIMITS.caption),
     alt_text: z.string().trim().min(1).max(SOCIAL_CONTENT_LIMITS.altText),
+    visual_direction: z.string().trim().min(5).max(3000).optional(),
     image_prompts: z.array(z.string().trim().min(5).max(SOCIAL_CONTENT_LIMITS.imagePrompt)).length(format === "carousel" ? 3 : 1)
   }).strict();
 }
