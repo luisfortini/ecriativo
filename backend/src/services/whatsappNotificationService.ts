@@ -3,8 +3,10 @@ import { get, run } from "../db/connection.js";
 import fs from "node:fs/promises";
 import fsSync from "node:fs";
 import path from "node:path";
+import { mediaFilename, readMedia } from "./mediaStorageService.js";
+import { AppError } from "../utils/errors.js";
 
-type NotificationType = "campaign_completed" | "campaign_failed" | "queue_failed" | "agent_error" | "daily_summary" | "manual_test";
+type NotificationType = "campaign_completed" | "campaign_failed" | "queue_failed" | "agent_error" | "daily_summary" | "manual_test" | "social_content";
 
 interface SendOptions {
   clientId?: number | null;
@@ -15,6 +17,9 @@ interface SendOptions {
   recipient: string;
   message: string;
   mediaUrl?: string | null;
+  mediaBase64?: string;
+  mediaMimeType?: string;
+  mediaFileName?: string;
 }
 
 const globalDefaults = {
@@ -132,6 +137,48 @@ export async function sendCampaignCompleted(campaignId: number, force = false) {
     message,
     mediaUrl: campaign.final_image_url || campaign.image_url || null
   });
+}
+
+export async function sendSocialContentWhatsapp(contentId: number) {
+  if (!Number.isSafeInteger(contentId) || contentId <= 0) throw new AppError("Conteúdo inválido.", 422);
+  const content = await get<{ client_id: number; client_name: string; status: string; format: string; topic: string; caption: string; images: Array<{ url?: string; filename?: string }> }>(
+    `SELECT s.client_id, c.name client_name, s.status, s.format, s.topic, s.caption, s.images
+     FROM social_contents s JOIN clients c ON c.id = s.client_id WHERE s.id = ?`, [contentId]
+  );
+  if (!content) throw new AppError("Conteúdo não encontrado.", 404);
+  if (!["review", "approved"].includes(content.status)) throw new AppError("Aguarde a geração ou revisão do conteúdo antes de enviá-lo.", 409);
+  const expectedImages = content.format === "carousel" ? 3 : 1;
+  if (!Array.isArray(content.images) || content.images.length < expectedImages || content.images.slice(0, expectedImages).some(image => !image?.url && !image?.filename)) {
+    throw new AppError("Este conteúdo ainda não possui todas as artes. Conclua a geração antes de enviar.", 409);
+  }
+  const global = await getGlobalWhatsappSettings();
+  if (global.whatsapp_delivery_enabled !== true) throw new AppError("Ative o envio por WhatsApp nas configurações da empresa.", 422);
+  const clientSettings = await getClientWhatsappSettings(Number(content.client_id));
+  const recipient = recipientForClient(clientSettings, global);
+  if (!recipient) throw new AppError("Cadastre o WhatsApp do cliente ou um número padrão nas configurações.", 422);
+
+  const images = await Promise.all(content.images.slice(0, expectedImages).map(async image => {
+    const filename = mediaFilename(String(image.filename || image.url));
+    const stored = await readMedia("generated", filename);
+    if (!stored.content_type.startsWith("image/")) throw new AppError("Uma das artes não é uma imagem válida.", 422);
+    return { url: String(image.url || image.filename), data: stored.data.toString("base64"), contentType: stored.content_type, filename };
+  }));
+  const introduction = `Conteúdo de social media para ${content.client_name}\nPauta: ${content.topic}`;
+  let sent = 0;
+  for (const [index, image] of images.entries()) {
+    const message = index === 0
+      ? `${introduction}${expectedImages > 1 ? `\nArte 1 de ${expectedImages}` : ""}\n\nLegenda:\n${content.caption || "Sem legenda cadastrada."}`
+      : `Arte ${index + 1} de ${expectedImages} · ${content.client_name}`;
+    const result = await sendViaEvolution({
+      clientId: Number(content.client_id), type: "social_content", recipient, message,
+      mediaUrl: image.url, mediaBase64: image.data, mediaMimeType: image.contentType, mediaFileName: image.filename
+    });
+    if (result?.status !== "sent") {
+      throw new AppError(`Envio interrompido após ${sent} de ${expectedImages} arte(s). ${result?.error || "Verifique a conexão do WhatsApp."}`, 502);
+    }
+    sent++;
+  }
+  return { status: "sent", sent, total: expectedImages };
 }
 
 export function sendCampaignFailedAsync(campaignId: number, error: unknown) {
@@ -362,13 +409,13 @@ function textPayload(input: SendOptions) {
 }
 
 async function mediaPayload(input: SendOptions) {
-  const media = await mediaForProvider(input.mediaUrl || "");
+  const media = input.mediaBase64 || await mediaForProvider(input.mediaUrl || "");
   return {
     number: normalizeRecipient(input.recipient),
     mediatype: "image",
-    mimetype: "image/png",
+    mimetype: input.mediaMimeType || "image/png",
     media,
-    fileName: "criativo.png",
+    fileName: input.mediaFileName || "criativo.png",
     caption: input.message,
     options: { delay: 1200 }
   };
@@ -396,7 +443,10 @@ function localMediaPath(mediaUrl: string) {
 }
 
 function normalizeRecipient(value: string) {
-  return value.replace(/[^\d@g.-]/g, "");
+  const recipient = value.trim();
+  const jid = recipient.match(/^([\d.-]+)@(g\.us|s\.whatsapp\.net)$/i);
+  if (jid) return `${jid[1].replace(/\D/g, "")}@${jid[2].toLowerCase()}`;
+  return recipient.replace(/\D/g, "");
 }
 
 async function readProviderResponse(response: Response) {

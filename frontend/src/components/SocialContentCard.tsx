@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { SafeImage } from "./SafeImage";
 import { SocialCreativeImages } from "./SocialCreativeImages";
+import { MessageCircle } from "lucide-react";
 
 export interface SocialContent {
   id:number; batch_id:number; scheduled_date:string; format:string; topic:string; caption:string;
@@ -11,10 +12,11 @@ export interface SocialContent {
 const statuses:Record<string,string>={draft:"Ideia para aprovação",pending:"Na fila",processing:"Produzindo",review:"Aguardando sua revisão",approved:"Aprovado",rejected:"Reprovado",failed:"Precisa de atenção",cancelled:"Cancelado"};
 const formats:Record<string,string>={post:"Publicação",carousel:"Carrossel",story:"Story"};
 
-export function SocialContentCard({item,busy,selected,onSelect,download,act,editor,onError}:{
+export function SocialContentCard({item,busy,selected,onSelect,download,act,editor,onError,onSendWhatsapp}:{
   item:SocialContent; busy:boolean; selected:number[]; onSelect:(indexes:number[])=>void;
   download:(url:string,filename:string)=>void;
   onError:(message:string)=>void;
+  onSendWhatsapp:(id:number)=>void;
   act:(action:"generate"|"approve"|"reject",note?:string)=>Promise<void>; editor:ReactNode;
 }) {
   const [rejectOpen,setRejectOpen]=useState(false);
@@ -27,6 +29,7 @@ export function SocialContentCard({item,busy,selected,onSelect,download,act,edit
     {item.caption&&<section aria-label="Legenda do conteúdo" className="rounded-xl bg-slate-50 p-4"><h4 className="mb-2 text-sm font-semibold">Legenda</h4><p className="whitespace-pre-wrap text-sm leading-relaxed">{item.caption}</p><button type="button" className="btn-secondary mt-3" onClick={()=>{if(!navigator.clipboard){onError("Não foi possível copiar a legenda. Selecione o texto e copie manualmente.");return;}void navigator.clipboard.writeText(item.caption).catch(()=>onError("Não foi possível copiar a legenda. Selecione o texto e copie manualmente."));}}>Copiar legenda</button>{item.alt_text&&<details className="mt-3"><summary className="cursor-pointer text-sm text-slate-600">Descrição acessível da imagem</summary><p className="mt-2 text-sm">{item.alt_text}</p></details>}</section>}
     {editor}
     <div className="flex flex-wrap gap-2">
+      {["review","approved"].includes(item.status)&&item.images.filter(image=>Boolean(image?.url)).length >= (item.format==="carousel"?3:1)&&<button type="button" disabled={busy} className="btn-secondary" onClick={()=>onSendWhatsapp(item.id)}><MessageCircle size={16}/> Enviar via WhatsApp</button>}
       {["draft","failed","cancelled"].includes(item.status)&&<button type="button" disabled={busy} className="btn-primary" onClick={()=>void act("generate")}>{item.status==="draft"?"Aprovar ideia e gerar":"Tentar geração novamente"}</button>}
       {item.status==="review"&&<button type="button" disabled={busy} className="btn-primary" onClick={()=>void act("approve")}>Aprovar conteúdo</button>}
       {["review","approved"].includes(item.status)&&<button type="button" disabled={busy} className="btn-secondary" aria-expanded={rejectOpen} onClick={()=>setRejectOpen(current=>!current)}>Reprovar conteúdo</button>}

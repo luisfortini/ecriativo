@@ -8,6 +8,7 @@ import { addPhoto, listSubjects, saveSubject, setPrimaryPhoto } from "../service
 import { z } from "zod";
 import { requestEditorialCorrections } from "../services/editorialCorrectionService.js";
 import { contentAction, createEditorialBatch, editEditorialContent, getEditorialCalendar, listEditorialPlans, saveEditorialPlan } from "../services/editorialService.js";
+import { sendSocialContentWhatsapp } from "../services/whatsappNotificationService.js";
 
 export const contentRoutes = Router();
 const upload = multer({ dest: config.uploadFilesDir, limits: { fileSize: 12 * 1024 * 1024, files: 1 } });
@@ -24,6 +25,9 @@ contentRoutes.post("/social-media/plans/:id/batches",asyncHandler(async (req,res
   const input = z.object({week_start:z.string().date().optional(),retry:z.boolean().default(false)}).safeParse(req.body);
   if(!input.success) throw new AppError("Semana inválida.",422);
   res.status(201).json(await createEditorialBatch(Number(req.params.id),input.data.week_start,undefined,input.data.retry));
+}));
+contentRoutes.post("/social-media/contents/:id/send-whatsapp",asyncHandler(async (req,res) => {
+  res.json(await sendSocialContentWhatsapp(Number(req.params.id)));
 }));
 contentRoutes.post("/social-media/contents/:id/:action",asyncHandler(async (req,res) => {
   await contentAction(Number(req.params.id),String(req.params.action),String(req.body.note ?? ""));res.json({ok:true});

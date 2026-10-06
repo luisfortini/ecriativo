@@ -86,6 +86,32 @@ async function main() {
     await editorial.processEditorialQueue({research:async()=>[],write:async()=>({caption:"Legenda teste",alt_text:"Produto",image_prompts:["Produto em fundo limpo"]}),image:async()=>{generations++;return {imagePath:path.join(temp,"result.png"),imageUrl:"https://test.invalid/generated/result.png",aiUsageLogId:1};}});
     await editorial.processEditorialQueue({research:async()=>[],write:async()=>{throw new Error("Não deveria repetir");},image:async()=>{throw new Error("Não deveria repetir");}});
     assert.equal(generations,1);
+    const whatsapp=await import("../services/whatsappNotificationService.js");
+    const testImage=await sharp({create:{width:16,height:16,channels:3,background:"#114488"}}).png().toBuffer();
+    await db.runWithOrganizationContext(orgA,async()=>{
+      await storage.persistMedia("generated","result.png",testImage);
+      await whatsapp.updateGlobalWhatsappSettings({whatsapp_delivery_enabled:true,evolution_base_url:"https://whatsapp.test.invalid",evolution_api_key:"fake",evolution_instance_name:"test"});
+      await whatsapp.updateClientWhatsappSettings(clientId,{whatsapp_group:"5511999999999@g.us"});
+    });
+    const originalFetch=globalThis.fetch;
+    const sentMedia:Array<{number:string;media:string;caption:string}>=[];
+    globalThis.fetch=(async(input:RequestInfo|URL,init?:RequestInit)=>{
+      if(String(input).startsWith("https://whatsapp.test.invalid/")){
+        const body=JSON.parse(String(init?.body));sentMedia.push(body);
+        return new Response(JSON.stringify({id:"fake-message"}),{status:200,headers:{"content-type":"application/json"}});
+      }
+      return originalFetch(input,init);
+    }) as typeof fetch;
+    try {
+      await db.runWithOrganizationContext(orgB,()=>assert.rejects(()=>whatsapp.sendSocialContentWhatsapp(contentId),/Conteúdo não encontrado/));
+      const sent=await db.runWithOrganizationContext(orgA,()=>whatsapp.sendSocialContentWhatsapp(contentId));
+      assert.deepEqual({sent:sent.sent,total:sent.total},{sent:1,total:1});
+      assert.equal(sentMedia[0].number,"5511999999999@g.us");
+      assert.equal(sentMedia[0].media,testImage.toString("base64"));
+      assert.match(sentMedia[0].caption,/Legenda teste/);
+      const logged=await db.runWithOrganizationContext(orgA,()=>db.get<{status:string}>("SELECT status FROM notification_logs WHERE notification_type='social_content' ORDER BY id DESC LIMIT 1"));
+      assert.equal(logged?.status,"sent");
+    } finally {globalThis.fetch=originalFetch;}
     await db.runWithOrganizationContext(orgA,async()=>{
       const item=await db.get<{status:string}>("SELECT status FROM social_contents WHERE id=?",[contentId]);assert.equal(item!.status,"review");
       await editorial.contentAction(contentId,"approve");
@@ -159,6 +185,21 @@ async function main() {
       assert.equal(item!.status,"review");assert.equal(item!.images[0].filename,"partial-slide.png");
       assert.equal(item!.images[1].filename,"corrected-slide.png");assert.equal(item!.images[2].filename,"retried-slide.png");assert.equal(item!.caption,"Preservar legenda");
     });
+    const carouselFetch=globalThis.fetch;
+    const carouselMessages:string[]=[];
+    globalThis.fetch=(async(input:RequestInfo|URL,init?:RequestInit)=>{
+      if(String(input).startsWith("https://whatsapp.test.invalid/")){
+        carouselMessages.push(JSON.parse(String(init?.body)).caption);
+        return new Response(JSON.stringify({id:"fake-carousel"}),{status:200,headers:{"content-type":"application/json"}});
+      }
+      return carouselFetch(input,init);
+    }) as typeof fetch;
+    try {
+      const sent=await db.runWithOrganizationContext(orgA,()=>whatsapp.sendSocialContentWhatsapp(carouselId));
+      assert.equal(sent.sent,3);assert.equal(carouselMessages.length,3);
+      assert.match(carouselMessages[0],/Preservar legenda/);
+      assert.match(carouselMessages[2],/Arte 3 de 3/);
+    } finally {globalThis.fetch=carouselFetch;}
     await db.runWithOrganizationContext(orgB,async()=>{
       await assert.rejects(()=>storage.readMedia("generated","corrected-slide.png"));
       await assert.rejects(()=>corrections.requestEditorialCorrections(correctionPlan,{note:"Tentativa externa",targets:[{content_id:carouselId,image_indexes:[1]}]}));
@@ -188,7 +229,7 @@ async function main() {
       assert.equal(editCalls,1);
     } finally {Images.prototype.edit=originalEdit;}
     console.log("Correção seletiva, legenda preservada, semana antiga, histórico e mídia sem disco validados.");
-    console.log(JSON.stringify({status:"ok",checks:["localização e aniversário","biblioteca e imagens privadas","isolamento empresa e cliente","revogação de material","lote semanal idempotente","produção e aprovação","permissões HTTP"]}));
+    console.log(JSON.stringify({status:"ok",checks:["localização e aniversário","biblioteca e imagens privadas","isolamento empresa e cliente","revogação de material","lote semanal idempotente","produção e aprovação","envio WhatsApp simulado","permissões HTTP"]}));
   } finally {
     if(server)await new Promise<void>(resolve=>server!.close(()=>resolve()));
     if(pool)await pool.end();
