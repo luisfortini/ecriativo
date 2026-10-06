@@ -9,6 +9,7 @@ import type { CampaignFormat, CreativeOutput, NormalizedBriefing, StrategyOutput
 import { recordAiUsage, type AiOperationType } from "./aiCostService.js";
 import { persistMedia, ensureMediaPath, readMedia } from "./mediaStorageService.js";
 import { AppError } from "../utils/errors.js";
+import { fitImageToCanvas, imageFramingInstruction, imageRequestSize } from "./imageCanvasService.js";
 
 const strategySchema = {
   type: "object",
@@ -140,15 +141,19 @@ export async function generateImage(
       ? visual.social_layout ? "Crie o layout e os textos da arte; reserve a região central para as fotos reais, sem desenhar produtos ou pessoas. As fotos serão aplicadas pelo sistema." : "Crie apenas um fundo, sem produtos, pessoas, textos ou logos. As fotos reais serão aplicadas depois." : "";
     const visualPrompt = `${prompt}\n${compositionInstruction}\n${visual?.no_people ? "Não incluir pessoas, rostos ou silhuetas humanas." : ""}\n${style ? `Imagem ${creative?2:1}: referência SOMENTE de identidade visual, cores, tipografia e margens. Não copie os textos nem as marcas presentes na referência. O perfil atual prevalece sobre a referência. Não desenhe logos, inclusive os presentes na imagem de referência; a logo oficial será aplicada depois.` : ""}\n${modelRefs.map((ref, index) => `Referência ${index + 1 + (creative ? 1 : 0) + (style?1:0)}: ${ref.kind === "person" ? "pessoa" : "produto"} ${ref.name}. Preserve: ${ref.preservation_notes}`).join("\n")}`;
     const editInstruction=creative ? "A primeira imagem é a arte atual a ser corrigida. Aplique os ajustes solicitados e as regras atuais de marca e idioma. Preserve somente os elementos que já respeitam essas regras. Remova marcas estranhas ou logos geradas quando solicitado.\n" : "";
-    if((editInstruction+visualPrompt).length>32000)throw new Error("As regras da marca e a descrição da arte excedem o limite de geração. Simplifique os textos longos do perfil ou a pauta antes de tentar novamente.");
+    const framingInstruction = imageFramingInstruction(format, config.imageModel);
+    // SDK 5 predates custom GPT Image 2 sizes; the API accepts WIDTHxHEIGHT.
+    const size = imageRequestSize(format, config.imageModel) as OpenAI.Images.ImageGenerateParams["size"];
+    const effectivePrompt = `${editInstruction}${visualPrompt}\n${framingInstruction}`;
+    if(effectivePrompt.length>32000)throw new Error("As regras da marca e a descrição da arte excedem o limite de geração. Simplifique os textos longos do perfil ou a pauta antes de tentar novamente.");
     const response = (creative || style || refs.length && visual?.mode === "reference") ? await client.images.edit({
       model: config.imageModel,
       image: [...(creative ? [await toFile(creative,"arte-original.png",{type:"image/png"})] : []),...(style?[await toFile(style,"identidade-visual.png",{type:"image/png"})]:[]),...await Promise.all(modelRefs.map(async ref => toFile(await fs.readFile(photoPath(ref.filename)), ref.filename, { type: "image/png" })))],
-      prompt: editInstruction+visualPrompt, size: imageSize(format), quality: "medium", n: 1
+      prompt: effectivePrompt, size: size as OpenAI.Images.ImageEditParams["size"], quality: "medium", n: 1
     }) : await client.images.generate({
       model: config.imageModel,
-      prompt: visualPrompt,
-      size: imageSize(format),
+      prompt: effectivePrompt,
+      size,
       quality: "medium",
       n: 1
     });
@@ -181,11 +186,10 @@ export async function generateImage(
           input: await sharp(photoPath(ref.filename)).resize(tileWidth - 20, Math.floor(height * 0.7), { fit: "contain", background: "#ffffff" }).png().toBuffer(),
           left: 40 + index * tileWidth, top: Math.floor(height * 0.15)
         })));
-        buffer = await sharp(buffer).resize(width, height).composite(tiles).png().toBuffer();
+        buffer = await sharp(buffer).resize(width, height, {fit:"cover",position:"centre"}).composite(tiles).png().toBuffer();
       }
       if (visual) {
-        const dimensions = format === "9:16" ? [1080,1920] : format === "4:5" ? [1080,1350] : format === "16:9" ? [1920,1080] : [1080,1080];
-        buffer = await sharp(buffer).resize(dimensions[0],dimensions[1],{fit:"contain",background:"#ffffff"}).png().toBuffer();
+        buffer = await fitImageToCanvas(buffer, format);
       }
       if(visual?.social_layout && visual.brand_logo_filename) {
         const logo=(await readMedia("uploads",visual.brand_logo_filename)).data;
@@ -219,12 +223,6 @@ export async function generateImage(
     });
     throw error;
   }
-}
-
-function imageSize(format: CampaignFormat) {
-  if (format === "16:9") return "1536x1024" as const;
-  if (format === "4:5" || format === "9:16") return "1024x1536" as const;
-  return "1024x1024" as const;
 }
 
 async function saveGeneratedImage(buffer: Buffer, extension: "png" | "webp" | "jpg" | "svg") {

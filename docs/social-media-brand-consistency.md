@@ -16,3 +16,9 @@ Para corrigir um conteúdo antigo:
 Uma refação interrompida mantém as versões antigas pendentes e pode continuar sem repetir a reescrita de texto nem as artes já concluídas. O histórico preserva a direção visual e as imagens anteriores. O limite do plano continua sendo aplicado a cada tentativa de imagem.
 
 A migração `014_social_brand_and_language` adiciona o idioma ao cliente e a direção visual ao conteúdo. A criação e a atualização do perfil aceitam idioma vazio sem violar a restrição do banco. O upload de referências sem extensão é identificado pelo conteúdo do arquivo.
+
+## Formatos sem faixas externas
+
+A geração e a edição com GPT Image 2 solicitam a proporção final diretamente: 1024×1280 (4:5), 1008×1792 (9:16), 1792×1008 (16:9) ou 1024×1024 (1:1). São redimensionadas proporcionalmente para o tamanho de publicação, sem adicionar fundo branco. Modelos antigos conservam os tamanhos compatíveis e usam reenquadramento central; o prompt calcula uma área segura adicional para proteger textos e elementos importantes do corte. A logo oficial continua sendo aplicada após o reenquadramento.
+
+As instruções pedem fundo até as bordas e não copiar faixas externas das referências. Isso não proíbe branco intencional na identidade visual. Imagens já salvas não são modificadas automaticamente; selecione as artes para refazer e peça remoção das faixas externas. A posição exata do conteúdo produzido por IA ainda precisa de revisão humana.
