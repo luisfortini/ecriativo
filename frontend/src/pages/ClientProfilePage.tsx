@@ -10,6 +10,7 @@ import type { ClientAssetType, ClientProfile } from "../types";
 import { uiLabel } from "../utils/uiLabels";
 import { VisualLibrary } from "../components/VisualLibrary";
 import { Steps } from "../components/Steps";
+import { BrandAssetGallery } from "../components/BrandAssetGallery";
 import { useStudio } from "../studio/StudioContext";
 
 const fields = {
@@ -377,7 +378,7 @@ export function ClientProfilePage() {
           ))}
         </div>
       ) : (
-        <div className="grid gap-6 xl:grid-cols-[1fr_360px]">
+        <div className="grid items-start gap-6 xl:grid-cols-[1fr_360px]">
           <form className="panel p-5" onSubmit={submit}>
             <h2 className="studio-section-title mb-2">{tab==="Dados gerais"?"Conheça sua empresa":tab==="Identidade visual"?"Uma identidade, em cada publicação":tab}</h2>
             <p className="helper mb-5">{tab==="Dados gerais"?"O contato e o endereço abaixo são públicos e podem aparecer nas artes e legendas. Não confunda com o WhatsApp interno da equipe.":tab==="Identidade visual"?"Escolha o idioma e descreva a paleta e o estilo. As próximas gerações usarão essas definições.":"Estes ajustes complementam o perfil da marca."}</p>
@@ -420,18 +421,7 @@ export function ClientProfilePage() {
               </button>
             </form>
 
-            <div className="panel p-5">
-              <h2 className="mb-3 font-bold text-ink">Arquivos cadastrados</h2>
-              <div className="space-y-3">
-                {client.assets.map((asset) => (
-                  <a key={asset.id} className="block rounded-md border border-slate-200 p-3 text-sm hover:border-brand" href={asset.file_url} target="_blank">
-                    <p className="font-semibold text-ink">{assetLabels[asset.type]}</p>
-                    <p className="text-slate-500">{asset.description || "Sem descrição"}</p>
-                    {asset.ai_summary && <p className="mt-2 text-xs text-slate-500">{asset.ai_summary}</p>}
-                  </a>
-                ))}
-              </div>
-            </div>
+            <BrandAssetGallery key={client.id} assets={client.assets} labels={assetLabels} />
           </aside>
         </div>
       )}
