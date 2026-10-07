@@ -11,6 +11,7 @@ import { generateImage } from "./openaiService.js";
 import { mediaFilename, readMedia } from "./mediaStorageService.js";
 import { requestEditorialCorrections, type CorrectionRequest } from "./editorialCorrectionService.js";
 import { socialImagePrompt } from "./socialBrandContract.js";
+import { assertContentNotScheduled } from "./socialPublishingService.js";
 
 export const editorialPlanSchema = z.object({
   client_id: z.coerce.number().int().positive(), name: z.string().trim().min(2).max(120),
@@ -92,6 +93,7 @@ export async function getEditorialCalendar(planId: number) {
 }
 
 export async function contentAction(id: number, action: string, note = "") {
+  if(action === "reject" || action === "regenerate")await assertContentNotScheduled(id);
   const item = await get<{status:string; plan_id:number;active:boolean;format:string}>("SELECT c.status,c.format,b.plan_id,p.active FROM social_contents c JOIN editorial_batches b ON b.id=c.batch_id JOIN editorial_plans p ON p.id=b.plan_id WHERE c.id=?",[id]);
   if (!item) throw new AppError("Conteúdo não encontrado.",404);
   if (action === "regenerate") {

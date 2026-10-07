@@ -12,6 +12,8 @@
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",
     "test:tenant": "tsx --test src/tests/organizationRole.test.ts src/tests/editorialCalendar.test.ts",
+    "test:social-publishing": "tsx --test src/tests/socialPublishing.test.ts",
+    "smoke:social-publishing": "tsx src/scripts/smokeSocialPublishing.ts",
     "test:editorial-output": "tsx --test src/tests/socialContentOutput.test.ts src/tests/socialBrandContract.test.ts src/tests/imageCanvas.test.ts",
     "smoke:content": "tsx src/scripts/smokeContent.ts",
     "backfill:media": "tsx src/scripts/backfillMedia.ts",

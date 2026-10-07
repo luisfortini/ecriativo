@@ -3,8 +3,10 @@ import { all, runWithOrganizationContext } from "../db/connection.js";
 import { processDueQueue } from "./campaignPlannerService.js";
 import { sendDailySummary } from "./whatsappNotificationService.js";
 import { processEditorialQueue } from "./editorialService.js";
+import { processSocialPublications } from "./socialPublishingService.js";
 
 export function startQueueWorker() {
+  const publishingTask = cron.schedule("* * * * *",()=>{void processSocialPublications().catch(()=>console.error("Falha na fila de publicação social; consulte o histórico."));});
   const editorialTask = cron.schedule("* * * * *", () => {
     void processEditorialQueue().catch(error => console.error("Erro no worker editorial",error));
   });
@@ -19,7 +21,7 @@ export function startQueueWorker() {
     });
   });
 
-  return [queueTask, dailySummaryTask, editorialTask];
+  return [queueTask, dailySummaryTask, editorialTask,publishingTask];
 }
 
 export async function sendDailySummaries() {

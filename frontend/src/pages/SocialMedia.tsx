@@ -10,6 +10,7 @@ import { ErrorBanner } from "../components/ErrorBanner";
 import { EmptyState } from "../components/EmptyState";
 import { LoadingBlock } from "../components/LoadingBlock";
 import { useResolveErrorFeedback } from "../components/FeedbackProvider";
+import { SocialPublishingPanel } from "../components/SocialPublishingPanel";
 
 async function downloadImage(url:string,filename:string) {
   const source=new URL(url,API_URL);
@@ -115,6 +116,7 @@ export function SocialMedia() {
         {view==="review"&&selected&&!calendar&&(calendarLoading?<LoadingBlock/>:<EmptyState><p>Não foi possível carregar os conteúdos deste plano.</p><button type="button" className="btn-secondary mt-3" disabled={busy} onClick={()=>void perform(refresh)}>Tentar novamente</button></EmptyState>)}
         {view==="review"&&calendar&&<>
           <section className="panel p-5"><h2 className="text-lg font-semibold">Planejar a semana · {calendar.plan.name}</h2><div className="my-3 flex flex-wrap items-end gap-3"><label className="label">Início da semana (segunda-feira)<input className="field" type="date" value={week} onChange={e=>setWeek(e.target.value)}/></label><button type="button" disabled={busy||!calendar.plan.active} className="btn-primary" onClick={()=>void perform(()=>request(`/social-media/plans/${selected}/batches`,{method:"POST",...json({...(week?{week_start:week}:{}),retry:true})}))}>{busy?"Processando…":"Planejar semana"}</button></div><p className="helper">Deixe a data em branco para usar a semana atual. Vamos pesquisar ideias e organizar as publicações. Se uma tentativa falhar, use este botão para retomar.</p>{!calendar.plan.active&&<p className="mt-3 text-sm text-amber-800">Este plano está pausado. Ative-o em “Configurar planos” para planejar a produção.</p>}{calendar.batches.map(batch=><div key={batch.id} className="mt-3 rounded-xl bg-slate-50 p-3 text-sm"><span className="font-medium">Semana de {batch.week_start.slice(0,10).split("-").reverse().join("/")}</span><span className="status-badge ml-2">{labels[batch.status]||batch.status}</span><p className="mt-2 text-slate-600">{batch.research_note}</p><p className="mt-1 text-xs text-slate-500">{batch.image_calls} imagens solicitadas</p></div>)}</section>
+          <SocialPublishingPanel key={calendar.plan.client_id} clientId={Number(calendar.plan.client_id)} contents={calendar.contents}/>
           <div className="flex flex-wrap items-end justify-between gap-3"><h2 className="text-lg font-semibold">Conteúdos para acompanhar</h2><label className="label m-0">Mostrar<select className="field" value={filter} onChange={e=>setFilter(e.target.value)}><option value="all">Todos os conteúdos</option><option value="review">Aguardando revisão</option><option value="failed">Com erro</option><option value="approved">Aprovados</option></select></label></div>
           {!calendar.contents.length&&<EmptyState>Seu plano está pronto. Use “Planejar semana” para pesquisar ideias e organizar as publicações.</EmptyState>}
           {calendar.contents.length>0&&!calendar.contents.some(item=>filter==="all"||item.status===filter)&&<EmptyState>Nenhum conteúdo nesta situação. Escolha outro filtro.</EmptyState>}

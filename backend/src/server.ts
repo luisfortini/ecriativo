@@ -8,6 +8,7 @@ import { requireOrganization } from "./middleware/organizationMiddleware.js";
 import { authRoutes } from "./routes/authRoutes.js";
 import { campaignRoutes } from "./routes/campaignRoutes.js";
 import { contentRoutes } from "./routes/contentRoutes.js";
+import { socialPublishingRoutes,socialPublishingPublicRoutes } from "./routes/socialPublishingRoutes.js";
 import { startQueueWorker } from "./services/queueWorker.js";
 import { backfillPersistentMedia } from "./services/mediaStorageService.js";
 import { errorHandler } from "./utils/errors.js";
@@ -64,6 +65,8 @@ app.get("/health/database", async (_req, res, next) => {
 });
 
 app.use("/api/auth", authRoutes);
+app.use("/api", socialPublishingPublicRoutes);
+app.use("/api", requireAuth, requireOrganization, socialPublishingRoutes);
 app.use("/api", requireAuth, requireOrganization, campaignRoutes);
 app.use("/api", requireAuth, requireOrganization, contentRoutes);
 app.use(errorHandler);

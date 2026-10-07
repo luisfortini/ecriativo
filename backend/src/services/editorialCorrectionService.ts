@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { all, run, transaction } from "../db/connection.js";
 import { AppError } from "../utils/errors.js";
+import { assertContentNotScheduled } from "./socialPublishingService.js";
 
 export interface CorrectionRequest {note:string;indexes:number[];completed:number[];rewrite_text?:boolean;text_updated?:boolean}
 const inputSchema=z.object({
@@ -21,6 +22,7 @@ export async function requestEditorialCorrections(planId:number|undefined,raw:un
     if(items.length!==targets.length)throw new AppError("Um dos conteúdos não pertence ao plano selecionado.",404);
     const calls=new Map<number,number>();
     for(const item of items) {
+      await assertContentNotScheduled(Number(item.id));
       if(!item.active)throw new AppError("Ative o plano antes de solicitar correções.",409);
       if(!["review","rejected","approved","failed","cancelled"].includes(item.status))throw new AppError("Aguarde os conteúdos em produção ou na fila antes de corrigir.",409);
       const target=targets.find(t=>t.content_id===Number(item.id))!;
