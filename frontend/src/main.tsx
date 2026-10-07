@@ -25,6 +25,9 @@ import { OrganizationSettings } from "./pages/OrganizationSettings";
 import { SocialMedia } from "./pages/SocialMedia";
 import "./styles.css";
 import { FeedbackProvider } from "./components/FeedbackProvider";
+import { StudioHome, StudioCreate } from "./pages/StudioHome";
+import { StudioReview } from "./pages/StudioReview";
+import { StudioPublishing } from "./pages/StudioPublishing";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
@@ -35,9 +38,14 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="/login" element={<Login />} />
             <Route element={<ProtectedRoute />}>
               <Route element={<AppShell />}>
-                <Route path="/" element={<Dashboard />} />
+                <Route path="/" element={<StudioHome />} />
+                <Route path="/criar" element={<StudioCreate />} />
+                <Route path="/revisar" element={<StudioReview />} />
+                <Route path="/anuncios" element={<Dashboard />} />
                 <Route path="/clientes" element={<Clients />} />
                 <Route element={<ManagerRoute />}>
+                  <Route path="/calendario" element={<StudioPublishing mode="calendar" />} />
+                  <Route path="/redes" element={<StudioPublishing mode="connections" />} />
                   <Route path="/social-media" element={<SocialMedia />} />
                   <Route path="/agentes" element={<AgentCenter />} />
                   <Route path="/planejador" element={<CampaignPlanner />} />

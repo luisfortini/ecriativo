@@ -8,6 +8,7 @@ export type UserRole = "admin" | "user";
 export type OrganizationRole = "owner" | "admin" | "member";
 
 export interface AuthOrganization {
+  accountType: "company" | "agency";
   id: number;
   name: string;
   slug: string;
@@ -104,8 +105,8 @@ export async function switchOrganization(userId: number, organizationId: number)
 }
 
 async function loadAuthUser(user: UserRow, preferredOrganizationId?: number): Promise<AuthUser> {
-  const memberships = await all<{ id: number; name: string; slug: string; role: OrganizationRole; is_default: boolean; plan_code: string; billing_status: string }>(
-    `SELECT o.id, o.name, o.slug, o.plan_code, o.billing_status, m.role, m.is_default
+  const memberships = await all<{ id: number; name: string; slug: string; account_type: "company" | "agency"; role: OrganizationRole; is_default: boolean; plan_code: string; billing_status: string }>(
+    `SELECT o.id, o.name, o.slug, o.account_type, o.plan_code, o.billing_status, m.role, m.is_default
        FROM organization_members m
        JOIN organizations o ON o.id = m.organization_id
        WHERE m.user_id = ? AND m.status = 'active' AND o.status = 'active'
@@ -120,8 +121,8 @@ async function loadAuthUser(user: UserRow, preferredOrganizationId?: number): Pr
   }
   const organization = requestedOrganization ?? memberships[0];
   if (!organization) throw new AppError("Usuario sem organizacao ativa.", 403);
-  const organizations = memberships.map(({ id, name, slug, role, plan_code, billing_status }) => ({
-    id: Number(id), name, slug, role, planCode: plan_code, billingStatus: billing_status
+  const organizations = memberships.map(({ id, name, slug, role, account_type, plan_code, billing_status }) => ({
+    id: Number(id), name, slug, role, accountType: account_type, planCode: plan_code, billingStatus: billing_status
   }));
   return {
     id: Number(user.id),
@@ -131,7 +132,7 @@ async function loadAuthUser(user: UserRow, preferredOrganizationId?: number): Pr
     organizationRole: organization.role,
     organization: {
       id: Number(organization.id), name: organization.name, slug: organization.slug, role: organization.role,
-      planCode: organization.plan_code, billingStatus: organization.billing_status
+      accountType: organization.account_type, planCode: organization.plan_code, billingStatus: organization.billing_status
     },
     organizations
   };

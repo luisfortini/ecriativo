@@ -1,4 +1,5 @@
 import type { ClientProfile } from "../types.js";
+import { brandContactContext } from "./brandContact.js";
 
 export function socialContentLanguage(client: ClientProfile) {
   if (client.content_language?.trim()) return client.content_language.trim();
@@ -10,6 +11,7 @@ export function socialContentLanguage(client: ClientProfile) {
 
 export function socialBrandContract(client: ClientProfile) {
   const data = {
+    public_contact: brandContactContext(client),
     name: client.name, language: socialContentLanguage(client), colors: client.color_palette,
     forbidden_colors: client.forbidden_colors, typography: client.preferred_typography,
     approved_styles: client.approved_styles, forbidden_styles: client.forbidden_styles,

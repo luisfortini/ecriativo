@@ -8,22 +8,24 @@ import { PageHeader } from "../components/PageHeader";
 import { SafeImage } from "../components/SafeImage";
 import { getCampaigns } from "../services/api";
 import type { CampaignSummary } from "../types";
+import { useStudio } from "../studio/StudioContext";
 
-export function Dashboard() {
+export function Dashboard({ embedded = false }: { embedded?: boolean }) {
+  const { brand } = useStudio();
   const [campaigns, setCampaigns] = useState<CampaignSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
     getCampaigns()
-      .then(setCampaigns)
+      .then(data => setCampaigns(data.filter(item => !brand || Number(item.client_id) === Number(brand.id))))
       .catch((err: Error) => setError(err.message))
       .finally(() => setLoading(false));
-  }, []);
+  }, [brand?.id]);
 
   return (
     <>
-      <PageHeader
+      {!embedded && <PageHeader
         title="Meus anúncios"
         description="Crie anúncios para seus clientes e acompanhe os resultados. Abra um anúncio para revisar, baixar ou pedir ajustes."
         action={
@@ -32,7 +34,7 @@ export function Dashboard() {
             Criar anúncio
           </Link>
         }
-      />
+      />}
 
       {error && <ErrorBanner message={error} />}
       {loading ? (

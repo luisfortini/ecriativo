@@ -4,7 +4,7 @@ import { seedOrganizationDefaults } from "../db/migrate.js";
 import type { OrganizationRole } from "./authService.js";
 import { AppError } from "../utils/errors.js";
 
-export async function createOrganization(userId: number, name: string) {
+export async function createOrganization(userId: number, name: string, accountType: "company" | "agency" = "company") {
   const normalizedName = name.trim();
   const baseSlug = slugify(normalizedName) || "empresa";
   const organization = await transaction(async (client) => {
@@ -15,8 +15,8 @@ export async function createOrganization(userId: number, name: string) {
       slug = `${baseSlug}-${suffix}`;
     }
     const result = await run(
-      "INSERT INTO organizations (name, slug, status) VALUES (?, ?, 'active')",
-      [normalizedName, slug],
+      "INSERT INTO organizations (name, slug, status, account_type) VALUES (?, ?, 'active', ?)",
+      [normalizedName, slug, accountType],
       client
     );
     const organizationId = Number(result.lastInsertRowid);
@@ -26,7 +26,7 @@ export async function createOrganization(userId: number, name: string) {
       [organizationId, userId],
       client
     );
-    return { id: organizationId, name: normalizedName, slug, role: "owner" as const };
+    return { id: organizationId, name: normalizedName, slug, accountType, role: "owner" as const };
   });
 
   await seedOrganizationDefaults(organization.id);
@@ -42,6 +42,19 @@ export async function listOrganizationMembers(organizationId: number) {
        ORDER BY CASE m.role WHEN 'owner' THEN 1 WHEN 'admin' THEN 2 ELSE 3 END, u.name`,
     [organizationId]
   );
+}
+
+export async function updateAccountType(organizationId: number, type: "company" | "agency") {
+  return transaction(async db => {
+    const organization = await get("SELECT id FROM organizations WHERE id = ? FOR UPDATE", [organizationId], db);
+    if (!organization) throw new AppError("Organização não encontrada.", 404);
+    const count = await get<{ total: number }>("SELECT COUNT(*)::int total FROM clients", [], db);
+    if (type === "company" && Number(count?.total) > 1) {
+      throw new AppError("Esta conta já atende várias marcas. Mantenha agência/profissional para preservar todos os clientes.", 409);
+    }
+    await run("UPDATE organizations SET account_type = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", [type, organizationId], db);
+    return { accountType: type };
+  });
 }
 
 export async function addOrganizationMember(

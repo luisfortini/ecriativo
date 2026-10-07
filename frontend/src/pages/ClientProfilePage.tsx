@@ -9,8 +9,11 @@ import { analyzeClientBrand, applyBrandAnalysis, getClient, getClientWhatsappSet
 import type { ClientAssetType, ClientProfile } from "../types";
 import { uiLabel } from "../utils/uiLabels";
 import { VisualLibrary } from "../components/VisualLibrary";
+import { Steps } from "../components/Steps";
+import { useStudio } from "../studio/StudioContext";
 
 const fields = {
+  contact_phone: "", instagram_handle: "", address: "",
   content_language: "",
   country: "", state: "", city: "", time_zone: "America/Sao_Paulo", anniversary_date: "", founding_year: "",
   name: "",
@@ -36,6 +39,7 @@ const fields = {
 };
 
 const fieldLabels: Record<keyof typeof fields, string> = {
+  contact_phone: "Telefone de contato público", instagram_handle: "@ do Instagram", address: "Endereço para divulgação",
   content_language: "Idioma dos conteúdos e artes",
   country: "País", state: "Estado", city: "Cidade", time_zone: "Fuso horário (ex.: America/Sao_Paulo)", anniversary_date: "Aniversário da empresa (MM-DD)", founding_year: "Ano de fundação (opcional)",
   name: "Nome",
@@ -61,6 +65,7 @@ const fieldLabels: Record<keyof typeof fields, string> = {
 };
 
 const tabs = ["Dados gerais", "Produtos e pessoas", "Identidade visual", "Tom de voz", "Referências", "Restrições", "Análise de Marca", "Histórico", "Aprendizados", "Notificações"];
+const guidedTabs = ["Dados gerais", "Identidade visual", "Produtos e pessoas", "Resumo"];
 
 const notificationDefaults: Record<string, string | boolean> = {
   responsible_phone: "",
@@ -97,6 +102,7 @@ async function validateAssetFile(type: ClientAssetType, file: File) {
 }
 
 export function ClientProfilePage() {
+  const {reloadBrands, selectBrand, clients:studioClients, canManage}=useStudio();
   const { id } = useParams();
   const resolveErrorFeedback = useResolveErrorFeedback();
   const [client, setClient] = useState<ClientProfile | null>(null);
@@ -119,6 +125,7 @@ export function ClientProfilePage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
 
   function load() {
     if (!id) return;
@@ -134,15 +141,22 @@ export function ClientProfilePage() {
   }
 
   useEffect(load, [id]);
+  useEffect(()=>{if(id)selectBrand(Number(id));},[id,studioClients.length]);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (!client) return;
     setSaving(true);
     setError("");
+    setSuccess("");
     try {
       const updated = await updateClient(client.id, form);
       setClient(updated);
+      await reloadBrands();
+      selectBrand(Number(updated.id));
+      setSuccess("Perfil salvo. Esses dados serão usados nas próximas gerações.");
+      const currentStep=guidedTabs.indexOf(tab);
+      if(currentStep>=0&&currentStep<2)setTab(guidedTabs[currentStep+1]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Não foi possível salvar o perfil.");
     } finally {
@@ -292,8 +306,9 @@ export function ClientProfilePage() {
   }
 
   const visibleFields = useMemo(() => {
-    if (tab === "Dados gerais") return ["name", "segment", "business_description", "target_audience", "differentiators", "positioning", "site_url", "instagram_url", "country", "state", "city", "time_zone", "anniversary_date", "founding_year"];
-    if (tab === "Identidade visual") return ["color_palette", "forbidden_colors", "preferred_typography"];
+    if (tab === "Dados gerais") return ["name", "segment", "business_description", "contact_phone", "instagram_handle", "address", "country", "state", "city", "time_zone", "anniversary_date", "founding_year"];
+    if (tab === "Identidade visual") return ["content_language", "color_palette", "approved_styles", "brand_voice", "preferred_typography", "forbidden_colors"];
+    if (tab === "Estratégia") return ["target_audience", "differentiators", "positioning", "site_url", "instagram_url"];
     if (tab === "Tom de voz") return ["content_language", "brand_voice", "preferred_ctas"];
     if (tab === "Referências") return ["visual_references", "approved_styles"];
     if (tab === "Restrições") return ["forbidden_styles", "communication_restrictions", "segment_policies"];
@@ -306,23 +321,25 @@ export function ClientProfilePage() {
 
   return (
     <>
-      <PageHeader title={client.name} description="Perfil criativo do cliente: memória estratégica e visual usada automaticamente pelos agentes." />
+      <PageHeader title={"Vamos preparar " + client.name} description="Faça uma vez, use em cada criação. Comece com o essencial e aperfeiçoe o perfil quando quiser." />
       {error && <ErrorBanner message={error} />}
-
-      <div className="mb-5 flex gap-2 overflow-x-auto">
-        {tabs.map((item) => (
+      {success&&<p role="status" className="studio-success mb-5">{success}</p>}
+      <Steps labels={["Sua empresa","Identidade e idioma","Fotos reais","Tudo pronto"]} current={Math.max(0,guidedTabs.indexOf(tab))} onChange={index=>setTab(guidedTabs[index])} disabled={saving}/>
+      <details className="mb-6 studio-secondary-tools"><summary>Personalizar mais: estratégia, referências e histórico</summary><div className="studio-tabs mt-3">
+        {["Estratégia",...tabs.filter(item=>!guidedTabs.includes(item)&&(canManage||item!=="Notificações"))].map((item) => (
           <button
             key={item}
-            className={`shrink-0 rounded-md px-3 py-2 text-sm font-medium ${tab === item ? "bg-brand text-white" : "bg-white text-slate-700"}`}
+            className={tab===item?"active":""}
+            aria-pressed={tab===item}
             onClick={() => setTab(item)}
             type="button"
           >
             {item}
           </button>
         ))}
-      </div>
+      </div></details>
 
-      {tab === "Produtos e pessoas" ? <VisualLibrary clientId={Number(client.id)} /> : tab === "Análise de Marca" ? (
+      {tab === "Resumo" ? <section className="panel p-6 sm:p-8"><span className="studio-eyebrow">PERFIL DA MARCA</span><h2 className="studio-section-title mt-2">{client.name}</h2><dl className="studio-profile-summary">{["segment","content_language","color_palette","contact_phone","instagram_handle","address","city","anniversary_date"].map(key=><div key={key}><dt>{fieldLabels[key as keyof typeof fields]}</dt><dd>{String(client[key as keyof ClientProfile]||"Não informado")}</dd></div>)}</dl><p className="helper">{!client.content_language||!client.color_palette?"Defina idioma e paleta em Identidade e idioma para orientar a geração.":"A marca está preparada para criar. Você pode atualizar o perfil a qualquer momento."}</p><Link className="btn-primary mt-5" to="/criar">Começar a criar</Link></section> : tab === "Produtos e pessoas" ? <><VisualLibrary clientId={Number(client.id)} /><div className="action-bar mt-5 flex justify-between"><button type="button" className="btn-secondary" onClick={()=>setTab("Identidade visual")}>Voltar</button><button type="button" className="btn-primary" onClick={()=>setTab("Resumo")}>Ver resumo da marca</button></div></> : tab === "Análise de Marca" ? (
         <BrandAnalysisTab
           client={client}
           form={form}
@@ -362,18 +379,22 @@ export function ClientProfilePage() {
       ) : (
         <div className="grid gap-6 xl:grid-cols-[1fr_360px]">
           <form className="panel p-5" onSubmit={submit}>
+            <h2 className="studio-section-title mb-2">{tab==="Dados gerais"?"Conheça sua empresa":tab==="Identidade visual"?"Uma identidade, em cada publicação":tab}</h2>
+            <p className="helper mb-5">{tab==="Dados gerais"?"O contato e o endereço abaixo são públicos e podem aparecer nas artes e legendas. Não confunda com o WhatsApp interno da equipe.":tab==="Identidade visual"?"Escolha o idioma e descreva a paleta e o estilo. As próximas gerações usarão essas definições.":"Estes ajustes complementam o perfil da marca."}</p>
             <div className="grid gap-4 md:grid-cols-2">
               {visibleFields.map((field) => (
                 <TextField key={field} field={field as keyof typeof fields} value={form[field as keyof typeof fields]} onChange={setForm} />
               ))}
             </div>
+            {error&&<p role="alert" className="studio-inline-error mt-4">{error}</p>}
             <button className="btn-primary mt-5" disabled={saving}>
               <Save size={16} />
-              {saving ? "Salvando..." : "Salvar perfil"}
+              {saving ? "Salvando..." : guidedTabs.includes(tab) ? "Salvar e continuar" : "Salvar perfil"}
             </button>
           </form>
 
           <aside className="space-y-4">
+            <div className="studio-summary"><strong>Seu perfil acompanha cada criação</strong><p className="helper">Você não precisa preencher a marca novamente a cada conteúdo. Preencha telefone e @ exatamente como devem aparecer.</p><p className="helper">Cidade e aniversário ajudam a descobrir oportunidades locais.</p></div>
             <form className="panel p-5" onSubmit={sendAsset}>
               <h2 className="mb-4 font-bold text-ink">Arquivos da marca</h2>
               <label className="label">Tipo</label>
@@ -425,14 +446,14 @@ function TextField(props: { field: keyof typeof fields; value: string; onChange:
     const [month,day] = (props.value || "-").split("-");
     return <div><label className="label">Aniversário da empresa</label><div className="flex gap-2"><input aria-label="Dia do aniversário" className="field" type="number" min={1} max={31} placeholder="Dia" value={day || ""} onChange={e=>props.onChange(current=>({...current,anniversary_date:`${month || ""}-${e.target.value ? e.target.value.padStart(2,"0") : ""}`}))}/><select aria-label="Mês do aniversário" className="field" value={month || ""} onChange={e=>props.onChange(current=>({...current,anniversary_date:`${e.target.value}-${day || ""}`}))}><option value="">Mês</option>{["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"].map((name,index)=><option key={name} value={String(index+1).padStart(2,"0")}>{name}</option>)}</select></div><button type="button" className="btn-secondary" onClick={()=>props.onChange(current=>({...current,anniversary_date:""}))}>Limpar data</button><p className="text-xs text-slate-500">O ano de fundação é opcional e permite calcular quantos anos a empresa completa.</p></div>;
   }
-  const isLong = !["name", "segment", "color_palette", "forbidden_colors", "preferred_typography", "country", "state", "city", "time_zone", "founding_year"].includes(props.field);
+  const isLong = !["name", "segment", "color_palette", "forbidden_colors", "preferred_typography", "country", "state", "city", "time_zone", "founding_year","contact_phone","instagram_handle","site_url","instagram_url"].includes(props.field);
   return (
     <div className={isLong ? "md:col-span-2" : undefined}>
-      <label className="label">{label}</label>
+      <label className="label" htmlFor={"brand-"+props.field}>{label}</label>
       {isLong ? (
-        <textarea className="field min-h-28" value={props.value} onChange={(event) => props.onChange((current) => ({ ...current, [props.field]: event.target.value }))} />
+        <textarea id={"brand-"+props.field} className="field min-h-28" maxLength={props.field==="address"?500:undefined} placeholder={props.field==="address"?"Rua, número, bairro e complemento. Inclua cidade se desejar.":undefined} value={props.value} onChange={(event) => props.onChange((current) => ({ ...current, [props.field]: event.target.value }))} />
       ) : (
-        <input className="field" value={props.value} onChange={(event) => props.onChange((current) => ({ ...current, [props.field]: event.target.value }))} />
+        <input id={"brand-"+props.field} className="field" type={props.field==="contact_phone"?"tel":"text"} required={props.field==="name"} minLength={props.field==="name"?2:undefined} maxLength={props.field==="contact_phone"?40:props.field==="instagram_handle"?31:undefined} placeholder={props.field==="contact_phone"?"+55 (19) 99999-9999":props.field==="instagram_handle"?"@suamarca":undefined} value={props.value} onChange={(event) => props.onChange((current) => ({ ...current, [props.field]: event.target.value }))} />
       )}
     </div>
   );

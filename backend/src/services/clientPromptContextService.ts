@@ -1,5 +1,6 @@
 import { all, get } from "../db/connection.js";
 import type { ClientAsset, ClientPromptContext } from "../types.js";
+import { brandContactContext } from "./brandContact.js";
 
 const LIMITS = {
   brandMemorySummary: 1500,
@@ -24,6 +25,7 @@ export async function buildClientPromptContext(clientId: number): Promise<Client
   const recentReviews = await recentCreativeReviews(clientId);
 
   return compactObject({
+    contato_publico: brandContactContext({ contact_phone: text(client.contact_phone), instagram_handle: text(client.instagram_handle), address: text(client.address) }),
     nome: text(client.name),
     segmento: text(client.segment),
     descricao_resumida_negocio: truncate(text(client.business_description), LIMITS.field),

@@ -8,7 +8,10 @@ import { AppError } from "../utils/errors.js";
 import { validateMainLogoFile } from "../services/brandOverlayService.js";
 import { validAnniversary, validTimeZone } from "../services/editorialCalendar.js";
 
+import { brandContactFields } from "../services/brandContact.js";
+
 const clientSchema = z.object({
+  ...brandContactFields,
   content_language: z.string().trim().max(120).optional(),
   country: z.string().trim().max(80).optional(),
   state: z.string().trim().max(80).optional(),

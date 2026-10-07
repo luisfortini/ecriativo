@@ -1,158 +1,82 @@
-import { Bot, Building2, CalendarClock, Clock3, DollarSign, LayoutDashboard, LogOut, Menu, MessageCircle, Plus, Users } from "lucide-react";
+import { Bot, Building2, CalendarDays, CheckCheck, ChevronDown, Clock3, DollarSign, Home, LogOut, Menu, MessageCircle, Plus, Settings, Users, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
+import { StudioProvider, useStudio } from "../studio/StudioContext";
 import { ErrorBanner } from "./ErrorBanner";
 
-const navItems = [
-  { to: "/", label: "Meus anúncios", icon: LayoutDashboard, group: "Criar e acompanhar" },
-  { to: "/nova-campanha", label: "Criar anúncio", icon: Plus, group: "Criar e acompanhar" },
-  { to: "/social-media", label: "Social media", icon: CalendarClock, manager: true, group: "Criar e acompanhar" },
-  { to: "/clientes", label: "Clientes e marcas", icon: Users, group: "Organizar" },
-  { to: "/planejador", label: "Planejar anúncios", icon: CalendarClock, manager: true, group: "Organizar" },
-  { to: "/historico", label: "Histórico", icon: Clock3, group: "Organizar" },
-  { to: "/agentes", label: "Central de Agentes", icon: Bot, manager: true, group: "Administração" },
-  { to: "/custos-ia", label: "Custos de IA", icon: DollarSign, manager: true, group: "Administração" },
-  { to: "/whatsapp", label: "WhatsApp", icon: MessageCircle, manager: true, group: "Administração" },
-  { to: "/empresa", label: "Empresa e equipe", icon: Building2, manager: true, group: "Administração" }
-];
-
 export function AppShell() {
+  const { user } = useAuth();
+  return <StudioProvider key={user?.id + ":" + user?.organization.id}><StudioShell /></StudioProvider>;
+}
+function StudioShell() {
   const { user, logout, switchOrganization } = useAuth();
+  const { brand, clients, selectBrand, isCompany, canManage, error: brandError, loading } = useStudio();
   const navigate = useNavigate();
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [wide, setWide] = useState(()=>window.matchMedia("(min-width: 1024px)").matches);
+  useEffect(()=>{
+    const media=window.matchMedia("(min-width: 1024px)");
+    const changed=()=>setWide(media.matches);
+    media.addEventListener("change",changed);return()=>media.removeEventListener("change",changed);
+  },[]);
+  useEffect(()=>{
+    if(!menuOpen)return;
+    const close=(event:KeyboardEvent)=>{if(event.key==="Escape"){setMenuOpen(false);document.querySelector<HTMLButtonElement>('[aria-label="Abrir menu"]')?.focus();}};
+    window.addEventListener("keydown",close);return()=>window.removeEventListener("keydown",close);
+  },[menuOpen]);
   const [error, setError] = useState("");
   const [switching, setSwitching] = useState(false);
-  useEffect(() => { setMenuOpen(false); }, [location.pathname]);
-  const canManage = user?.organizationRole === "owner" || user?.organizationRole === "admin";
-  const visibleNavItems = navItems.filter((item) => !item.manager || canManage);
-
+  useEffect(() => { setMenuOpen(false); document.getElementById("main-content")?.focus(); window.scrollTo(0, 0); }, [location.pathname]);
+  const navItems = [
+    { to: "/", label: "Início", icon: Home },
+    { to: "/criar", label: "Criar", icon: Plus },
+    { to: "/revisar", label: "Revisar", icon: CheckCheck },
+    ...(canManage ? [{ to: "/calendario", label: "Calendário", icon: CalendarDays }] : []),
+    { to: isCompany && brand ? "/clientes/" + brand.id : "/clientes", label: isCompany ? "Minha marca" : "Clientes e marcas", icon: Users },
+    ...(canManage ? [{ to: "/redes", label: "Redes conectadas", icon: MessageCircle }, { to: "/empresa", label: "Configurações", icon: Settings }] : [])
+  ];
   async function signOut() {
     try { await logout(); navigate("/login", { replace: true }); }
-    catch (err) { setError(err instanceof Error ? err.message : "Não foi possível sair. Tente novamente."); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : "Não foi possível sair."); }
   }
   async function changeOrganization(id: number) {
     if (switching) return;
     setSwitching(true);
-    try { await switchOrganization(id); setError(""); navigate("/", { replace: true }); }
-    catch (err) { setError(err instanceof Error ? err.message : "Não foi possível trocar de empresa."); }
+    try { await switchOrganization(id); navigate("/", { replace: true }); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : "Não foi possível trocar de conta."); }
     finally { setSwitching(false); }
   }
-
-  return (
-    <div className="min-h-screen bg-mist">
-      <a href="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[60] focus:rounded-xl focus:bg-white focus:p-4">Ir para o conteúdo</a>
-      <aside className="fixed inset-y-0 left-0 hidden w-64 flex-col overflow-y-auto border-r border-slate-200 bg-white px-5 py-6 lg:flex">
-        <div>
-          <img
-            src="/brand/logo-dark.png"
-            alt="e-Criativo"
-            className="h-12 w-auto max-w-[190px] object-contain"
-          />
-          <p className="mt-2 text-xs text-slate-500">Sua marca. Conteúdo com clareza.</p>
-        </div>
-
-        <nav aria-label="Navegação principal" className="mt-6 flex-1 space-y-1">
-          {visibleNavItems.map((item, index) => (
-            <div key={item.to}>
-            {(index === 0 || visibleNavItems[index - 1].group !== item.group) && <p className="pb-2 pt-4 text-xs font-medium text-slate-500">{item.group}</p>}
-            <NavLink
-              key={item.to}
-              to={item.to}
-              className={({ isActive }) =>
-                `flex min-h-11 items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium ${
-                  isActive ? "bg-brand text-white" : "text-slate-700 hover:bg-slate-100"
-                }`
-              }
-            >
-              <item.icon size={18} />
-              {item.label}
-            </NavLink>
-            </div>
-          ))}
-        </nav>
-
-        <div className="border-t border-slate-200 pt-4">
-          <label className="mb-1 block text-xs font-medium text-slate-500" htmlFor="organization-switcher">
-            Empresa
-          </label>
-          <select
-            id="organization-switcher"
-            className="mb-3 w-full rounded-md border border-slate-200 bg-white px-2 py-2 text-sm text-ink"
-            value={user?.organization.id ?? ""}
-            disabled={switching}
-            onChange={(event) => void changeOrganization(Number(event.target.value))}
-          >
-            {user?.organizations.map((organization) => (
-              <option key={organization.id} value={organization.id}>{organization.name}</option>
-            ))}
-          </select>
-          <p className="truncate text-sm font-semibold text-ink">{user?.name}</p>
-          <p className="truncate text-xs text-slate-500">{user?.email}</p>
-          <button
-            className="mt-3 flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
-            onClick={() => void signOut()}
-            type="button"
-          >
-            <LogOut size={17} />
-            Sair
-          </button>
-        </div>
-      </aside>
-
-      <div className="lg:pl-64">
-        <header className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur lg:hidden">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <img
-              src="/brand/logo-dark.png"
-              alt="e-Criativo"
-              className="h-8 w-auto max-w-[120px] object-contain sm:h-9 sm:max-w-[160px]"
-            />
-            <div className="flex gap-2"><button type="button" className="btn-secondary" aria-expanded={menuOpen} aria-controls="mobile-navigation" onClick={() => setMenuOpen(current => !current)}><Menu size={18} /> Menu</button><button
-              aria-label="Sair"
-              className="rounded-md p-2 text-slate-600 hover:bg-slate-100"
-              onClick={() => void signOut()}
-              type="button"
-            >
-              <LogOut size={18} />
-            </button>
-            </div>
-          </div>
-          <nav id="mobile-navigation" aria-label="Navegação principal" hidden={!menuOpen} className={`${menuOpen ? "grid" : "hidden"} max-h-[50vh] gap-2 overflow-y-auto sm:grid-cols-2`}>
-            {visibleNavItems.map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                className={({ isActive }) =>
-                  `flex shrink-0 items-center gap-2 rounded-md px-3 py-2 text-sm ${
-                    isActive ? "bg-brand text-white" : "bg-slate-100 text-slate-700"
-                  }`
-                }
-              >
-                <item.icon size={16} />
-                {item.label}
-              </NavLink>
-            ))}
-          </nav>
-          <label className="mt-3 block text-xs font-medium text-slate-500" htmlFor="mobile-organization-switcher">Empresa</label>
-          <select
-            id="mobile-organization-switcher"
-            className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-2 text-sm text-ink"
-            value={user?.organization.id ?? ""}
-            disabled={switching}
-            onChange={(event) => void changeOrganization(Number(event.target.value))}
-          >
-            {user?.organizations.map((organization) => (
-              <option key={organization.id} value={organization.id}>{organization.name}</option>
-            ))}
-          </select>
-        </header>
-        <main id="main-content" tabIndex={-1} className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-10">
-          {error && <ErrorBanner message={error} />}
-          <Outlet key={user?.organization.id} />
-        </main>
+  return <div className="studio-app">
+    <a href="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[60] focus:rounded-xl focus:bg-white focus:p-4">Ir para o conteúdo</a>
+    {menuOpen && <button type="button" className="studio-menu-backdrop" aria-label="Fechar menu" onClick={() => setMenuOpen(false)} />}
+    <aside id="studio-navigation" aria-hidden={!wide&&!menuOpen?true:undefined} {...(!wide&&!menuOpen?{inert:""}:{})} className={menuOpen ? "studio-sidebar is-open" : "studio-sidebar"}>
+      <div className="flex items-start justify-between gap-2"><Link to="/" className="studio-wordmark">e<span>•</span>Criativo<small>Seu estúdio de conteúdo</small></Link><button type="button" className="studio-icon-button lg:hidden" aria-label="Fechar menu" onClick={() => setMenuOpen(false)}><X size={20}/></button></div>
+      <div className="studio-account"><Building2 size={18}/><div className="min-w-0"><strong>{user?.organization.name}</strong><small>{isCompany ? "Empresa · sua própria marca" : "Agência / profissional"}</small></div></div>
+      <nav aria-label="Navegação principal" className="studio-nav">{navItems.map(item => <NavLink key={item.to} end={item.to === "/"} to={item.to} className={({ isActive }) => isActive ? "active" : ""}><item.icon size={19}/>{item.label}</NavLink>)}</nav>
+      <details className="studio-advanced"><summary><ChevronDown size={16}/> Mais ferramentas</summary><nav aria-label="Ferramentas adicionais">
+        <NavLink to="/anuncios"><Clock3 size={16}/> Anúncios da marca</NavLink><NavLink to="/historico"><Clock3 size={16}/> Histórico de artes</NavLink>
+        {canManage && <><NavLink to="/planejador"><CalendarDays size={16}/> Planejamento de anúncios</NavLink><NavLink to="/social-media"><CalendarDays size={16}/> Todos os planos sociais</NavLink><NavLink to="/agentes"><Bot size={16}/> Agentes de IA</NavLink><NavLink to="/custos-ia"><DollarSign size={16}/> Custos de IA</NavLink><NavLink to="/whatsapp"><MessageCircle size={16}/> WhatsApp</NavLink><NavLink to="/fila-geracao">Fila de produção</NavLink><NavLink to="/execucoes-planejador">Histórico do planejador</NavLink></>}
+      </nav></details>
+      <div className="studio-sidebar-footer">
+        {(user?.organizations.length || 0) > 1 && <label>Ambiente de trabalho<select aria-label="Trocar ambiente de trabalho" value={user?.organization.id} disabled={switching} onChange={event => void changeOrganization(Number(event.target.value))}>{user?.organizations.map(org => <option key={org.id} value={org.id}>{org.name}</option>)}</select></label>}
+        <strong>{user?.name}</strong><small>{user?.email}</small><button type="button" onClick={() => void signOut()}><LogOut size={16}/> Sair da conta</button>
       </div>
+    </aside>
+    <div className="studio-workspace">
+      <header className="studio-topbar">
+        <button type="button" className="btn-secondary lg:hidden" aria-label="Abrir menu" aria-expanded={menuOpen} aria-controls="studio-navigation" onClick={() => setMenuOpen(true)}><Menu size={19}/></button>
+        <div className="studio-context"><span>{isCompany ? "Sua marca" : "Você está trabalhando para"}</span>
+          {!isCompany && clients.length > 0 ? <select aria-label="Marca em trabalho" value={brand?.id ?? ""} disabled={loading} onChange={event => {selectBrand(Number(event.target.value)); navigate("/");}}>{clients.map(client => <option key={client.id} value={client.id}>{client.name}</option>)}</select> : <strong>{brand?.name || (loading ? "Carregando…" : "Prepare sua primeira marca")}</strong>}
+        </div>
+        <Link className="studio-topbar-link" to={brand ? "/clientes/" + brand.id : "/clientes"}>Perfil da marca <Users size={16}/></Link>
+      </header>
+      <main id="main-content" tabIndex={-1} className="studio-main">
+        {(error || brandError) && <ErrorBanner message={error || brandError}/>}
+        <Outlet key={brand?.id ?? "no-brand"}/>
+      </main>
+      <footer className="studio-footer">e-Criativo · Você cria com IA. Você decide o que publicar.</footer>
     </div>
-  );
+  </div>;
 }

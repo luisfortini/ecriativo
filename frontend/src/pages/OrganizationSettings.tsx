@@ -4,11 +4,14 @@ import { useAuth } from "../auth/AuthContext";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { LoadingBlock } from "../components/LoadingBlock";
 import { PageHeader } from "../components/PageHeader";
-import { addOrganizationMember, createOrganizationRequest, getOrganizationMembers } from "../services/api";
+import { addOrganizationMember, createOrganizationRequest, getOrganizationMembers, request } from "../services/api";
 import type { OrganizationMember } from "../types";
 
 export function OrganizationSettings() {
-  const { user, switchOrganization } = useAuth();
+  const { user, switchOrganization, refreshUser } = useAuth();
+  const [accountType,setAccountType]=useState<"company"|"agency">(user?.organization.accountType||"agency");
+  const [newAccountType,setNewAccountType]=useState<"company"|"agency">("company");
+  const [savingType,setSavingType]=useState(false);
   const [members, setMembers] = useState<OrganizationMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -29,7 +32,7 @@ export function OrganizationSettings() {
     setError("");
     setMessage("");
     try {
-      const organization = await createOrganizationRequest(companyName);
+      const organization = await createOrganizationRequest(companyName,newAccountType);
       await switchOrganization(organization.id);
       setCompanyName("");
       setMessage("Empresa criada e selecionada.");
@@ -54,7 +57,7 @@ export function OrganizationSettings() {
   if (loading) return <LoadingBlock label="Carregando empresa..." />;
 
   return <>
-    <PageHeader title="Empresa e equipe" description="Gerencie a organização ativa e quem pode acessar seus dados." />
+    <PageHeader title="Configurações do seu estúdio" description="Escolha como você trabalha e gerencie quem pode acessar este ambiente." />
     {error && <ErrorBanner message={error} />}
     {message && <div className="mb-4 rounded-md border border-accent/30 bg-accent-soft px-4 py-3 text-sm text-accent-hover">{message}</div>}
 
@@ -65,6 +68,15 @@ export function OrganizationSettings() {
       </div>
     </section>
 
+    <section className="panel mt-5 p-6">
+      <h2 className="studio-section-title">Como você usa o e-Criativo?</h2><p className="helper mb-4">Isso organiza a experiência. Não altera as permissões nem compartilha dados com outra conta.</p>
+      <form onSubmit={event=>{event.preventDefault();if(savingType)return;setSavingType(true);setError("");setMessage("");void request("/organization/experience",{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({account_type:accountType})}).then(async()=>{await refreshUser();setMessage("Experiência atualizada. Seus dados foram preservados.");}).catch(reason=>setError(reason.message)).finally(()=>setSavingType(false));}}>
+        <div className="grid gap-3 sm:grid-cols-2">{[["company","Empresa","Crio para a minha própria marca."],["agency","Agência / profissional","Atendo vários clientes, com uma identidade para cada um."]].map(([value,label,description])=><label className="studio-option" key={value}><input type="radio" name="account-type" value={value} checked={accountType===value} disabled={user?.organizationRole!=="owner"||savingType} onChange={()=>setAccountType(value as "company"|"agency")}/><span><strong>{label}</strong><small className="block mt-1 text-slate-600">{description}</small></span></label>)}</div>
+        <p className="helper">Contas de empresa trabalham com uma marca. Uma conta com vários clientes continua como agência/profissional; nenhum cadastro é apagado.</p>
+        {error&&<p role="alert" className="studio-inline-error mt-4">{error}</p>}
+        {user?.organizationRole==="owner"?<button className="btn-primary mt-4" disabled={savingType}>{savingType?"Salvando…":"Salvar tipo de conta"}</button>:<p className="helper">Somente o proprietário pode alterar o tipo de conta.</p>}
+      </form>
+    </section>
     <section className="panel mt-5 p-5">
       <h2 className="mb-4 font-bold text-ink">Equipe</h2>
       <div className="overflow-x-auto">
@@ -86,6 +98,7 @@ export function OrganizationSettings() {
       <p className="mb-4 text-sm text-slate-500">Cria um ambiente independente, sem compartilhar clientes, campanhas, custos ou configurações.</p>
       <form className="flex flex-col gap-3 sm:flex-row" onSubmit={createCompany}>
         <input className="field flex-1" placeholder="Nome da empresa" value={companyName} onChange={(event) => setCompanyName(event.target.value)} required minLength={2} />
+        <select className="field sm:w-60" aria-label="Tipo do novo ambiente" value={newAccountType} onChange={event=>setNewAccountType(event.target.value as "company"|"agency")}><option value="company">Empresa (uma marca)</option><option value="agency">Agência / profissional</option></select>
         <button className="btn-primary" type="submit"><Plus size={16} />Criar empresa</button>
       </form>
     </section>

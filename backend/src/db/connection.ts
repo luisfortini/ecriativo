@@ -51,7 +51,8 @@ export async function run(sql: string, params?: QueryParams, client?: PoolClient
 }
 
 export async function exec(sql: string, client?: PoolClient) {
-  await (client ?? pool).query(sql);
+  // Seeds and bulk operations must keep the same tenant and transaction as regular queries.
+  await query(sql, undefined, client);
 }
 
 export async function transaction<T>(callback: (client: PoolClient) => Promise<T>) {

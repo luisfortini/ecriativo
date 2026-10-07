@@ -70,11 +70,11 @@ export function switchOrganizationRequest(organizationId: number) {
   });
 }
 
-export function createOrganizationRequest(name: string) {
+export function createOrganizationRequest(name: string, accountType: "company" | "agency" = "company") {
   return request<{ id: number; name: string; slug: string; role: string }>("/auth/organizations", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name })
+    body: JSON.stringify({ name, account_type: accountType })
   });
 }
 

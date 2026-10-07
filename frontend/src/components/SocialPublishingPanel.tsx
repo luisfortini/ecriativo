@@ -21,7 +21,7 @@ function ReconcilePublication({item,busy,onResolve}:{item:Publication;busy:boole
   </div></details>;
 }
 
-export function SocialPublishingPanel({clientId,contents}:{clientId:number;contents:SocialContent[]}) {
+export function SocialPublishingPanel({clientId,contents,mode="all"}:{clientId:number;contents:SocialContent[];mode?:"all"|"calendar"|"connections"}) {
   const [data,setData]=useState<Overview|null>(null);
   const [error,setError]=useState("");
   const [success,setSuccess]=useState("");
@@ -42,12 +42,12 @@ export function SocialPublishingPanel({clientId,contents}:{clientId:number;conte
   }
   return <section className="panel space-y-5 p-5 sm:p-6" aria-label="Agendamento nas redes sociais">
     <div><h2 className="text-lg font-semibold">Agendar nas redes sociais</h2><p className="helper mt-1">Primeiro conecte a conta, depois aprove o conteúdo e escolha o horário. Instagram e Facebook têm agendamentos independentes.</p></div>
-    <ErrorBanner message={error}/>
+    {error&&<ErrorBanner message={error}/>}
     {success&&<p role="status" className="rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800">{success}</p>}
     {!data&&<button type="button" disabled={busy} className="btn-secondary" onClick={()=>void perform(reload,"Conexões atualizadas.")}>{error?"Tentar carregar novamente":"Carregando conexões…"}</button>}
     {data&&<>
       {!data.enabled&&<div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"><strong>Publicação real desativada no servidor.</strong><p className="mt-1">Você pode preparar os agendamentos, mas nada será publicado. A integração precisa ser configurada e validada antes de ser liberada.</p></div>}
-      <div className="flex flex-wrap gap-2"><button type="button" disabled={busy||!data.configured} className="btn-primary" onClick={()=>{
+      {mode!=="calendar"&&<><div className="flex flex-wrap gap-2"><button type="button" disabled={busy||!data.configured} className="btn-primary" onClick={()=>{
         const popup=window.open("about:blank","_blank");if(popup)popup.opener=null;
         void perform(async()=>{try{const result=await request<{url:string}>(`/social-media/clients/${clientId}/meta-connect`,{method:"POST"});if(popup)popup.location.href=result.url;else window.location.assign(result.url);}catch(e){popup?.close();throw e;}},"Continue a autorização na aba da Meta. Depois volte e atualize as conexões.");
       }}>Conectar Instagram e Facebook</button><button type="button" className="btn-secondary" disabled={busy} onClick={()=>void perform(reload,"Conexões atualizadas.")}>Atualizar conexões</button></div>
@@ -56,7 +56,8 @@ export function SocialPublishingPanel({clientId,contents}:{clientId:number;conte
         {!data.accounts.length&&<p className="text-sm text-slate-500">Nenhuma conta conectada ainda.</p>}
         {data.accounts.map(account=><label key={account.id} className="flex items-start gap-3 rounded-xl border border-slate-200 p-3 text-sm"><input type="checkbox" disabled={busy} checked={account.active} onChange={e=>void perform(()=>request(`/social-media/accounts/${account.id}`,{method:"PATCH",...json({active:e.target.checked})}),e.target.checked?"Conta ativada para agendamentos.":"Conta desativada. Seus agendamentos pendentes foram cancelados.")}/><span><strong>{networks[account.platform]} · {account.name}</strong><span className="block text-slate-500">{account.active?"Disponível para agendar":"Conectada, mas desativada"}</span></span></label>)}
       </div>
-      <form className="space-y-3 rounded-xl bg-slate-50 p-4" onSubmit={e=>{e.preventDefault();void perform(async()=>{await request(`/social-media/contents/${contentId}/schedule`,{method:"POST",...json({account_id:Number(accountId),local_datetime:date,time_zone:zone})});setDate("");},data.enabled?"Publicação agendada. Acompanhe o resultado no histórico.":"Agendamento salvo. Nada será publicado enquanto a publicação real estiver desativada.");}}>
+      </>}
+      {mode!=="connections"&&<><form className="space-y-3 rounded-xl bg-slate-50 p-4" onSubmit={e=>{e.preventDefault();void perform(async()=>{await request(`/social-media/contents/${contentId}/schedule`,{method:"POST",...json({account_id:Number(accountId),local_datetime:date,time_zone:zone})});setDate("");},data.enabled?"Publicação agendada. Acompanhe o resultado no histórico.":"Agendamento salvo. Nada será publicado enquanto a publicação real estiver desativada.");}}>
         <h3 className="font-semibold">Escolher conteúdo e horário</h3>
         <label className="label">Conteúdo aprovado<select required className="field" value={contentId} onChange={e=>setContentId(e.target.value)}><option value="">Selecione um conteúdo</option>{approved.map(item=><option key={item.id} value={item.id}>{item.topic}</option>)}</select></label>
         {!approved.length&&<p className="helper">Aprove um post ou carrossel para agendar. Stories não estão incluídos nesta primeira versão.</p>}
@@ -74,7 +75,7 @@ export function SocialPublishingPanel({clientId,contents}:{clientId:number;conte
           {item.status==="scheduled"&&<button type="button" className="btn-secondary mt-3" disabled={busy} onClick={()=>void perform(()=>request(`/social-media/publications/${item.id}/cancel`,{method:"POST"}),"Agendamento cancelado. Você pode escolher outro horário acima.")}>Cancelar para reagendar</button>}
           {item.status==="uncertain"&&<ReconcilePublication item={item} busy={busy} onResolve={(id,body)=>void perform(()=>request(`/social-media/publications/${id}/reconcile`,{method:"POST",...json(body)}),"Conferência registrada. O histórico foi atualizado.")}/>}
         </article>)}
-      </div>
+      </div></>}
     </>}
   </section>;
 }

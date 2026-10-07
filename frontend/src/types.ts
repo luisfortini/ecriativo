@@ -38,6 +38,9 @@ export interface ClientAsset {
 }
 
 export interface ClientProfile extends ClientSummary {
+  contact_phone?: string | null;
+  instagram_handle?: string | null;
+  address?: string | null;
   content_language?: string | null;
   country?: string | null;
   state?: string | null;
@@ -209,6 +212,7 @@ export interface AuthUser {
 }
 
 export interface AuthOrganization {
+  accountType: "company" | "agency";
   id: number;
   name: string;
   slug: string;

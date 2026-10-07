@@ -10,7 +10,9 @@ import { ErrorBanner } from "../components/ErrorBanner";
 import { EmptyState } from "../components/EmptyState";
 import { LoadingBlock } from "../components/LoadingBlock";
 import { useResolveErrorFeedback } from "../components/FeedbackProvider";
-import { SocialPublishingPanel } from "../components/SocialPublishingPanel";
+import { Link, useLocation } from "react-router-dom";
+import { useStudio } from "../studio/StudioContext";
+import { Steps } from "../components/Steps";
 
 async function downloadImage(url:string,filename:string) {
   const source=new URL(url,API_URL);
@@ -44,15 +46,18 @@ function ContentEditor({item,busy,save}:{item:Content;busy:boolean;save:(body:un
   </div></details>;
 }
 
-export function SocialMedia() {
+export function SocialMedia({embedded=false}:{embedded?:boolean}) {
+  const {brand}=useStudio();
+  const location=useLocation();
+  const [planStep,setPlanStep]=useState(0);
   const resolveError=useResolveErrorFeedback();
-  const [view,setView]=useState<"review"|"plans">("review");
+  const [view,setView]=useState<"review"|"plans">(new URLSearchParams(location.search).get("view")==="plans"?"plans":"review");
   const [loading,setLoading]=useState(true);
   const [calendarLoading,setCalendarLoading]=useState(false);
   const [filter,setFilter]=useState("all");
   const [plans,setPlans]=useState<Plan[]>([]);
   const [clients,setClients]=useState<ClientSummary[]>([]);
-  const [form,setForm]=useState(initial);
+  const [form,setForm]=useState({...initial,client_id:brand?String(brand.id):""});
   const [visual,setVisual]=useState(emptySelection);
   const [editing,setEditing]=useState<number|null>(null);
   const [selected,setSelected]=useState<number|null>(null);
@@ -67,7 +72,7 @@ export function SocialMedia() {
   const [selectedImages,setSelectedImages]=useState<Record<string,number[]>>({});
   const selectedCount=Object.values(selectedImages).reduce((total,indexes)=>total+indexes.length,0);
   useEffect(()=>{setSelectedImages({});setCorrectionNote("");setCorrectionError(false);setRewriteText(false);},[selected]);
-  const load=()=>request<Plan[]>("/social-media/plans").then(data=>{setPlans(data);setSelected(current=>current??(data[0]?Number(data[0].id):null));});
+  const load=()=>request<Plan[]>("/social-media/plans").then(data=>{const scoped=data.filter(plan=>!brand||Number(plan.client_id)===Number(brand.id));setPlans(scoped);setSelected(current=>scoped.some(plan=>Number(plan.id)===current)?current:(scoped[0]?Number(scoped[0].id):null));});
   const refresh=async()=>{await load();if(selected)setCalendar(await request<Calendar>(`/social-media/plans/${selected}/calendar`));};
   useEffect(()=>{void Promise.all([load(),getClients().then(setClients)]).catch(e=>setError(e.message)).finally(()=>setLoading(false));},[]);
   useEffect(()=>{let active=true;setCalendar(null);setCalendarLoading(Boolean(selected));if(!selected)return;const reload=()=>request<Calendar>(`/social-media/plans/${selected}/calendar`).then(data=>{if(active)setCalendar(data);}).catch(e=>{if(active)setError(e.message);}).finally(()=>{if(active)setCalendarLoading(false);});void reload();const timer=setInterval(reload,20000);return()=>{active=false;clearInterval(timer);};},[selected]);
@@ -82,31 +87,39 @@ export function SocialMedia() {
     } catch(e) {setError(e instanceof Error?e.message:"Não foi possível enviar as artes pelo WhatsApp.");}
     finally {setBusy(false);}
   }
-  function edit(plan:Plan) {setView("plans");setEditing(Number(plan.id));setForm({client_id:String(plan.client_id),name:plan.name,posts_per_week:plan.posts_per_week,pillars:plan.pillars.join("\n"),formats:plan.formats,weekly_image_limit:plan.weekly_image_limit,automatic:plan.automatic,active:plan.active});setVisual({...emptySelection,...plan.visual_selection});}
+  function edit(plan:Plan) {setView("plans");setPlanStep(0);setEditing(Number(plan.id));setForm({client_id:String(plan.client_id),name:plan.name,posts_per_week:plan.posts_per_week,pillars:plan.pillars.join("\n"),formats:plan.formats,weekly_image_limit:plan.weekly_image_limit,automatic:plan.automatic,active:plan.active});setVisual({...emptySelection,...plan.visual_selection});}
   return <>
-    <PageHeader title="Social media" description="Conteúdo orgânico semanal com tendências, datas locais e a identidade de cada cliente."/>
+    {!embedded&&<PageHeader title={view==="plans"?"Vamos criar sua semana de conteúdo":"Conteúdos da sua marca"} description="Da ideia à aprovação: tendências, datas locais e a identidade da marca acompanham cada publicação."/>}
     {error&&<ErrorBanner message={error}/>}
     {success&&<div role="status" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-700"><p>{success}</p><button type="button" className="btn-secondary" onClick={()=>setSuccess("")}>Fechar confirmação</button></div>}
     <div className="mb-6 flex flex-wrap items-end justify-between gap-4"><div role="group" aria-label="Área de social media" className="flex flex-wrap gap-2"><button type="button" className={view==="review"?"btn-primary":"btn-secondary"} aria-pressed={view==="review"} onClick={()=>setView("review")}>Revisar conteúdos</button><button type="button" className={view==="plans"?"btn-primary":"btn-secondary"} aria-pressed={view==="plans"} onClick={()=>setView("plans")}>Configurar planos</button></div>{plans.length>0&&<label className="label m-0 w-full sm:w-72">Plano de conteúdo<select className="field" disabled={busy} value={selected??""} onChange={e=>setSelected(Number(e.target.value))}>{plans.map(plan=><option key={plan.id} value={plan.id}>{plan.client_name} · {plan.name}</option>)}</select></label>}</div>
     {busy&&<p role="status" className="mb-4 rounded-xl bg-slate-100 p-3 text-sm text-slate-700">Estamos processando sua solicitação. Aguarde para realizar outra ação.</p>}
-    {loading?<LoadingBlock/>:<div className={`grid gap-6 ${view==="plans"?"xl:grid-cols-[380px_1fr]":""}`}>
+    {loading?<LoadingBlock/>:<div className={`grid gap-6 ${view==="plans"?"xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]":""}`}>
       {view==="plans"&&<div className="space-y-5">
-        <form className="panel space-y-4 p-5" onSubmit={e=>{e.preventDefault();if(!form.formats.length){setError("Escolha pelo menos um formato para as publicações.");return;}void perform(async()=>{const saved=await request<{id:number}>(editing?`/social-media/plans/${editing}`:"/social-media/plans",{method:editing?"PUT":"POST",...json({...form,client_id:Number(form.client_id),pillars:form.pillars.split("\n").map(s=>s.trim()).filter(Boolean),visual_selection:visual})});setSelected(Number(saved.id));setEditing(null);setForm(initial);setVisual(emptySelection);setView("review");});}}>
+        <form className="panel space-y-4 p-5 sm:p-7" onSubmit={e=>{e.preventDefault();if(!form.client_id||!form.name.trim()||!form.pillars.trim()){setError("Informe o nome do plano e pelo menos um assunto para a marca.");setPlanStep(0);return;}if(!form.formats.length){setError("Escolha pelo menos um formato para as publicações.");setPlanStep(1);return;}if(planStep<2){setPlanStep(current=>current+1);return;}void perform(async()=>{const saved=await request<{id:number}>(editing?`/social-media/plans/${editing}`:"/social-media/plans",{method:editing?"PUT":"POST",...json({...form,client_id:Number(form.client_id),pillars:form.pillars.split("\n").map(s=>s.trim()).filter(Boolean),visual_selection:visual})});setSelected(Number(saved.id));setEditing(null);setForm({...initial,client_id:brand?String(brand.id):""});setPlanStep(0);setVisual(emptySelection);setView("review");});}}>
+          <Steps labels={["Ideia","Imagens","Confirmar"]} current={planStep} onChange={setPlanStep} disabled={busy}/>
           <h2 className="font-bold">{editing?"Editar plano":"Novo plano editorial"}</h2>
-          <label className="label">Cliente<select required disabled={Boolean(editing)} className="field" value={form.client_id} onChange={e=>{setForm({...form,client_id:e.target.value});setVisual(emptySelection);}}><option value="">Selecione</option>{clients.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
+          <fieldset hidden={planStep!==0} disabled={planStep!==0} className="space-y-4">
+          <label className="label">Marca<select required disabled={Boolean(editing)||Boolean(brand)} className="field" value={form.client_id} onChange={e=>{setForm({...form,client_id:e.target.value});setVisual(emptySelection);}}><option value="">Selecione</option>{clients.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
           <p className="text-xs text-slate-500">Cidade, estado, país e aniversário vêm dos dados gerais do cliente.</p>
           <label className="label">Nome do plano<input required minLength={2} className="field" value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/></label>
           <label className="label">Publicações por semana<input type="number" min={1} max={21} required className="field" value={form.posts_per_week} onChange={e=>setForm({...form,posts_per_week:Number(e.target.value)})}/></label>
           <label className="label">Assuntos da marca (um por linha)<textarea required rows={3} className="field" value={form.pillars} onChange={e=>setForm({...form,pillars:e.target.value})}/></label>
           <p className="helper">Por exemplo: dicas, bastidores e novidades dos produtos.</p>
-          <div className="flex flex-wrap gap-3">{[['post','Post'],['carousel','Carrossel (3 artes)'],['story','Story']].map(([value,label])=><label className="text-sm" key={value}><input type="checkbox" checked={form.formats.includes(value)} onChange={e=>setForm({...form,formats:e.target.checked?[...form.formats,value]:form.formats.filter(f=>f!==value)})}/> {label}</label>)}</div>
+          </fieldset><fieldset hidden={planStep!==1} disabled={planStep!==1} className="space-y-4">
+          <h3 className="font-semibold">Como os conteúdos devem aparecer?</h3>
+          <div className="flex flex-wrap gap-3">{[['post','Post'],['carousel','Carrossel (3 artes)'],['story','Story']].map(([value,label])=><label className="studio-option" key={value}><input type="checkbox" checked={form.formats.includes(value)} onChange={e=>setForm({...form,formats:e.target.checked?[...form.formats,value]:form.formats.filter(f=>f!==value)})}/> {label}</label>)}</div>
           <label className="label">Limite de imagens por semana<input type="number" min={1} max={100} required className="field" value={form.weekly_image_limit} onChange={e=>setForm({...form,weekly_image_limit:Number(e.target.value)})}/></label>
           <p className="text-xs text-slate-500">Cada arte e nova tentativa consome uma unidade. Pesquisa e texto também têm custos registrados em Custos de IA.</p>
           <VisualSelector clientId={Number(form.client_id)} value={visual} onChange={setVisual}/>
-          <label className="block text-sm"><input type="checkbox" checked={form.automatic} onChange={e=>setForm({...form,automatic:e.target.checked})}/> Produzir automaticamente as pautas da semana</label>
+          </fieldset><fieldset hidden={planStep!==2} disabled={planStep!==2} className="space-y-4">
+          <div className="studio-summary"><strong>{form.name || "Plano de conteúdo"}</strong><p>{brand?.name} · {form.posts_per_week} publicações por semana</p><p>Formatos: {form.formats.map(value=>({post:"Post",carousel:"Carrossel",story:"Story"}[value]||value)).join(", ")}</p><p className="whitespace-pre-wrap">{form.pillars}</p><p>Limite: {form.weekly_image_limit} imagens por semana, incluindo novas tentativas.</p></div>
+          <label className="studio-option"><input type="checkbox" checked={form.automatic} onChange={e=>setForm({...form,automatic:e.target.checked})}/> Produzir automaticamente as pautas da semana</label>
           <label className="block text-sm"><input type="checkbox" checked={form.active} onChange={e=>setForm({...form,active:e.target.checked})}/> Plano ativo</label>
           <p className="text-xs text-slate-500">Conteúdos produzidos aguardam revisão final. Ativar um plano permite pesquisa e geração conforme os limites.</p>
-          <button disabled={busy} className="btn-primary w-full">{busy?"Salvando…":"Salvar e ir para os conteúdos"}</button>
+          </fieldset>
+          {error&&<p role="alert" className="studio-inline-error">{error}</p>}
+          <div className="flex flex-wrap gap-3">{planStep>0&&<button type="button" disabled={busy} className="btn-secondary" onClick={()=>setPlanStep(current=>current-1)}>Voltar</button>}<button disabled={busy} className="btn-primary">{busy?"Salvando…":planStep<2?"Continuar":"Salvar plano de conteúdo"}</button></div>
           {editing&&<button type="button" className="btn-secondary w-full" disabled={busy} onClick={()=>{setEditing(null);setForm(initial);setVisual(emptySelection);}}>Cancelar edição</button>}
         </form>
       </div>}
@@ -115,8 +128,8 @@ export function SocialMedia() {
         {view==="review"&&!selected&&<EmptyState><p className="font-semibold">Vamos planejar o primeiro conteúdo?</p><p className="helper">Escolha o cliente, os assuntos e a quantidade de publicações por semana.</p><button type="button" className="btn-primary mt-4" onClick={()=>setView("plans")}>Criar meu primeiro plano</button></EmptyState>}
         {view==="review"&&selected&&!calendar&&(calendarLoading?<LoadingBlock/>:<EmptyState><p>Não foi possível carregar os conteúdos deste plano.</p><button type="button" className="btn-secondary mt-3" disabled={busy} onClick={()=>void perform(refresh)}>Tentar novamente</button></EmptyState>)}
         {view==="review"&&calendar&&<>
-          <section className="panel p-5"><h2 className="text-lg font-semibold">Planejar a semana · {calendar.plan.name}</h2><div className="my-3 flex flex-wrap items-end gap-3"><label className="label">Início da semana (segunda-feira)<input className="field" type="date" value={week} onChange={e=>setWeek(e.target.value)}/></label><button type="button" disabled={busy||!calendar.plan.active} className="btn-primary" onClick={()=>void perform(()=>request(`/social-media/plans/${selected}/batches`,{method:"POST",...json({...(week?{week_start:week}:{}),retry:true})}))}>{busy?"Processando…":"Planejar semana"}</button></div><p className="helper">Deixe a data em branco para usar a semana atual. Vamos pesquisar ideias e organizar as publicações. Se uma tentativa falhar, use este botão para retomar.</p>{!calendar.plan.active&&<p className="mt-3 text-sm text-amber-800">Este plano está pausado. Ative-o em “Configurar planos” para planejar a produção.</p>}{calendar.batches.map(batch=><div key={batch.id} className="mt-3 rounded-xl bg-slate-50 p-3 text-sm"><span className="font-medium">Semana de {batch.week_start.slice(0,10).split("-").reverse().join("/")}</span><span className="status-badge ml-2">{labels[batch.status]||batch.status}</span><p className="mt-2 text-slate-600">{batch.research_note}</p><p className="mt-1 text-xs text-slate-500">{batch.image_calls} imagens solicitadas</p></div>)}</section>
-          <SocialPublishingPanel key={calendar.plan.client_id} clientId={Number(calendar.plan.client_id)} contents={calendar.contents}/>
+          <details className="panel p-5" open={!calendar.contents.length}><summary className="cursor-pointer text-sm font-semibold">Planejar uma nova semana · {calendar.plan.name}</summary><div className="my-3 flex flex-wrap items-end gap-3"><label className="label">Início da semana (segunda-feira)<input className="field" type="date" value={week} onChange={e=>setWeek(e.target.value)}/></label><button type="button" disabled={busy||!calendar.plan.active} className="btn-primary" onClick={()=>void perform(()=>request(`/social-media/plans/${selected}/batches`,{method:"POST",...json({...(week?{week_start:week}:{}),retry:true})}))}>{busy?"Processando…":"Planejar semana"}</button></div><p className="helper">Deixe a data em branco para usar a semana atual. Vamos pesquisar ideias e organizar as publicações. Se uma tentativa falhar, use este botão para retomar.</p>{!calendar.plan.active&&<p className="mt-3 text-sm text-amber-800">Este plano está pausado. Ative-o em “Configurar planos” para planejar a produção.</p>}{calendar.batches.map(batch=><div key={batch.id} className="mt-3 rounded-xl bg-slate-50 p-3 text-sm"><span className="font-medium">Semana de {batch.week_start.slice(0,10).split("-").reverse().join("/")}</span><span className="status-badge ml-2">{labels[batch.status]||batch.status}</span><p className="mt-2 text-slate-600">{batch.research_note}</p><p className="mt-1 text-xs text-slate-500">{batch.image_calls} imagens solicitadas</p></div>)}</details>
+          <div className="studio-summary flex flex-wrap items-center justify-between gap-3"><p>Depois de aprovar, escolha quando publicar.</p><Link className="btn-secondary" to="/calendario">Abrir calendário</Link></div>
           <div className="flex flex-wrap items-end justify-between gap-3"><h2 className="text-lg font-semibold">Conteúdos para acompanhar</h2><label className="label m-0">Mostrar<select className="field" value={filter} onChange={e=>setFilter(e.target.value)}><option value="all">Todos os conteúdos</option><option value="review">Aguardando revisão</option><option value="failed">Com erro</option><option value="approved">Aprovados</option></select></label></div>
           {!calendar.contents.length&&<EmptyState>Seu plano está pronto. Use “Planejar semana” para pesquisar ideias e organizar as publicações.</EmptyState>}
           {calendar.contents.length>0&&!calendar.contents.some(item=>filter==="all"||item.status===filter)&&<EmptyState>Nenhum conteúdo nesta situação. Escolha outro filtro.</EmptyState>}

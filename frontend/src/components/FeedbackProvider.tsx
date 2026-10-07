@@ -17,7 +17,7 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
   const value = useMemo(() => ({publish, resolve}), [publish, resolve]);
   return <FeedbackContext.Provider value={value}>
     {children}
-    {messages.length > 0 && <aside aria-label="Erros que precisam de atenção" className="fixed right-3 top-3 z-50 w-[calc(100%-1.5rem)] max-w-sm rounded-2xl border border-red-200 bg-white p-4 shadow-xl sm:right-6 sm:top-6">
+    {messages.length > 0 && <aside role="region" aria-live="polite" aria-label="Erros que precisam de atenção" className="studio-error-notice">
       <div className="flex items-center gap-2 text-sm font-semibold text-red-800"><AlertCircle size={18} /> Não foi possível concluir</div>
       <p className="mt-2 break-words text-sm text-slate-700">{messages[messages.length - 1]}</p>
       <div className="mt-3 flex items-center justify-between gap-3">

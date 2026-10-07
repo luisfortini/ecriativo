@@ -8,6 +8,7 @@ import { AppError } from "../utils/errors.js";
 import { persistMediaPath } from "./mediaStorageService.js";
 
 const clientFields = [
+  "contact_phone", "instagram_handle", "address",
   "content_language",
   "country", "state", "city", "time_zone", "anniversary_date", "founding_year",
   "name",
@@ -73,33 +74,42 @@ export async function createClient(payload: ClientPayload) {
   if (!name) throw new Error("Informe o nome do cliente.");
   const organizationId = getDatabaseRequestContext()?.organizationId;
   if (!organizationId) throw new AppError("Organizacao nao selecionada.", 403);
-  const quota = await get<{ max_clients: number; total: number }>(
-    `SELECT o.max_clients, (SELECT COUNT(*)::int FROM clients) total
-       FROM organizations o WHERE o.id = ?`,
-    [organizationId]
-  );
-  if (quota && Number(quota.total) >= Number(quota.max_clients)) {
-    throw new AppError(`O plano atual permite ate ${quota.max_clients} clientes.`, 409);
-  }
+  return transaction(async db => {
+    // Serialize brand creation and account-mode changes for the same organization.
+    const account = await get<{ account_type: string }>("SELECT account_type FROM organizations WHERE id = ? FOR UPDATE", [organizationId], db);
+    const quota = await get<{ max_clients: number; total: number }>(
+      `SELECT o.max_clients, (SELECT COUNT(*)::int FROM clients) total
+         FROM organizations o WHERE o.id = ?`,
+      [organizationId], db
+    );
+    if (account?.account_type === "company" && Number(quota?.total) >= 1) {
+      throw new AppError("Sua conta de empresa já possui uma marca. Edite Minha marca ou altere o tipo de conta para agência/profissional em Configurações.", 409);
+    }
+    if (quota && Number(quota.total) >= Number(quota.max_clients)) {
+      throw new AppError(`O plano atual permite ate ${quota.max_clients} clientes.`, 409);
+    }
 
-  const result = await run(
-    `INSERT INTO clients (
-        name, segment, business_description, target_audience, differentiators, brand_voice,
-        positioning, color_palette, forbidden_colors, preferred_typography, visual_references,
-        approved_styles, forbidden_styles, communication_restrictions, preferred_ctas,
-        segment_policies, strategic_notes, brand_memory_summary, site_url, instagram_url,
-        country, state, city, time_zone, anniversary_date, founding_year, content_language
-      ) VALUES (
-        @name, @segment, @business_description, @target_audience, @differentiators, @brand_voice,
-        @positioning, @color_palette, @forbidden_colors, @preferred_typography, @visual_references,
-        @approved_styles, @forbidden_styles, @communication_restrictions, @preferred_ctas,
-        @segment_policies, @strategic_notes, @brand_memory_summary, @site_url, @instagram_url,
-        @country, @state, @city, COALESCE(@time_zone, 'America/Sao_Paulo'), @anniversary_date, @founding_year, COALESCE(@content_language, '')
-      )`,
-    cleanPayload(payload)
-  );
+    const result = await run(
+      `INSERT INTO clients (
+          name, segment, business_description, target_audience, differentiators, brand_voice,
+          positioning, color_palette, forbidden_colors, preferred_typography, visual_references,
+          approved_styles, forbidden_styles, communication_restrictions, preferred_ctas,
+          segment_policies, strategic_notes, brand_memory_summary, site_url, instagram_url,
+          country, state, city, time_zone, anniversary_date, founding_year, content_language,
+          contact_phone, instagram_handle, address
+        ) VALUES (
+          @name, @segment, @business_description, @target_audience, @differentiators, @brand_voice,
+          @positioning, @color_palette, @forbidden_colors, @preferred_typography, @visual_references,
+          @approved_styles, @forbidden_styles, @communication_restrictions, @preferred_ctas,
+          @segment_policies, @strategic_notes, @brand_memory_summary, @site_url, @instagram_url,
+          @country, @state, @city, COALESCE(@time_zone, 'America/Sao_Paulo'), @anniversary_date, @founding_year, COALESCE(@content_language, ''),
+          @contact_phone, @instagram_handle, @address
+        )`,
+      cleanPayload(payload), db
+    );
 
-  return getClient(Number(result.lastInsertRowid));
+    return getClient(Number(result.lastInsertRowid));
+  });
 }
 
 export async function updateClient(id: number, payload: ClientPayload) {

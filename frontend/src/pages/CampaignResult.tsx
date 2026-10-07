@@ -162,8 +162,10 @@ export function CampaignResult() {
       {error && <ErrorBanner message={error} />}
       {message && <div className="mb-4 rounded-md border border-accent/30 bg-accent-soft px-4 py-3 text-sm text-accent-hover">{message}</div>}
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_440px]">
-        <section className="space-y-4">
+      <div className="studio-campaign-review">
+        <details className="studio-campaign-technical">
+          <summary className="cursor-pointer text-sm font-medium">Ver estratégia e detalhes da produção</summary>
+          <div className="mt-4 space-y-4">
           {campaign.pipeline_run && (
             <Block title="Pipeline">
               <Info label="Situação do pipeline" value={uiLabel(campaign.pipeline_run.status)} />
@@ -219,16 +221,17 @@ export function CampaignResult() {
             <PromptBox value={campaign.creative.prompt_imagem} />
             <Info label="Restrições do prompt" value={campaign.creative.negative_prompt} />
           </Block>
-        </section>
+          </div>
+        </details>
 
-        <aside className="space-y-4">
+        <aside className="studio-campaign-content">
           <section className="panel overflow-hidden">
             <div className="border-b border-slate-200 px-4 py-3">
               <h2 className="font-semibold text-ink">Imagem final</h2>
             </div>
             <div className="bg-slate-100 p-4">
-              <div className="aspect-square overflow-hidden rounded-md">
-                <SafeImage className="h-full w-full object-cover" src={campaign.image_url} fallbackSrc={campaign.generated_image_url} alt={`Criativo gerado para ${campaign.cliente}`} />
+              <div className="overflow-hidden rounded-md">
+                <SafeImage className="max-h-[530px] w-full object-contain" src={campaign.image_url} fallbackSrc={campaign.generated_image_url} alt={`Criativo gerado para ${campaign.cliente}`} />
               </div>
             </div>
             <div className="border-t border-slate-200 bg-white p-4">
@@ -264,7 +267,7 @@ export function CampaignResult() {
           </section>
 
           <section className="panel p-4">
-            <h2 className="mb-3 font-bold text-ink">Feedback e aprendizado</h2>
+            <h2 className="mb-3 font-bold text-ink">A arte está pronta para usar?</h2><p className="helper mb-4">Confira o texto, a marca e os dados de contato antes de aprovar. Aprovar não ativa uma campanha paga.</p>
             <p className="mb-3 text-sm text-slate-600">Situação atual: <strong>{creativeStatusLabel(campaign.creative_status)}</strong></p>
             <div className="grid grid-cols-2 gap-2">
               <Action icon={<Check size={15} />} label="Aprovar" pending={pendingAction === "status_approved"} confirmedLabel={confirmedActions.status_approved} onClick={() => { setError(""); setReviewDecision("approved"); setReviewReason(""); }} />
@@ -272,14 +275,14 @@ export function CampaignResult() {
               <Action icon={<ThumbsUp size={15} />} label="Gostei do estilo" pending={pendingAction === "liked_style"} confirmedLabel={confirmedActions.liked_style} onClick={() => learn("liked_style", "Estilo aprovado")} />
               <Action icon={<ThumbsDown size={15} />} label="Não gostei" pending={pendingAction === "disliked_style"} confirmedLabel={confirmedActions.disliked_style} onClick={() => learn("disliked_style", "Estilo reprovado")} />
             </div>
-            <div className="mt-3 space-y-2">
+            <details className="mt-4"><summary className="cursor-pointer text-sm text-slate-600">Guardar preferências para as próximas criações</summary><div className="mt-3 space-y-2">
               <Action full icon={<Save size={15} />} label="Salvar headline como CTA preferido" pending={pendingAction === "save_cta"} confirmedLabel={confirmedActions.save_cta} onClick={() => learn("save_cta", "CTA preferido", campaign.strategy.headline)} />
               <Action full icon={<Save size={15} />} label="Salvar estilo visual como aprovado" pending={pendingAction === "approve_style"} confirmedLabel={confirmedActions.approve_style} onClick={() => learn("approve_style", "Estilo visual aprovado")} />
               <Action full icon={<Save size={15} />} label="Marcar estilo como proibido" pending={pendingAction === "forbid_style"} confirmedLabel={confirmedActions.forbid_style} onClick={() => learn("forbid_style", "Estilo visual proibido")} />
               <Action full icon={<Save size={15} />} label="Salvar paleta usada no cliente" pending={pendingAction === "save_palette"} confirmedLabel={confirmedActions.save_palette} onClick={() => learn("save_palette", "Paleta")} />
               <Action full icon={<Save size={15} />} label="Salvar observação estratégica" pending={pendingAction === "save_note"} confirmedLabel={confirmedActions.save_note} onClick={() => learn("save_note", "Observação estratégica")} />
               <Action full icon={<Save size={15} />} label="Salvar direção visual no cliente" pending={pendingAction === "save_visual_direction"} confirmedLabel={confirmedActions.save_visual_direction} onClick={() => learn("save_visual_direction", "Direção visual")} />
-            </div>
+            </div></details>
             {campaign.reviews?.length > 0 && (
               <div className="mt-5 border-t border-slate-200 pt-4">
                 <h3 className="mb-2 text-sm font-bold text-ink">Histórico de avaliações</h3>
@@ -314,6 +317,7 @@ export function CampaignResult() {
               onChange={(event) => setReviewReason(event.target.value)}
             />
             <div className="mt-4 flex justify-end gap-2">
+              {error&&<p role="alert" className="studio-inline-error">{error}</p>}
               <button className="rounded-md border border-slate-300 px-4 py-2 text-sm font-semibold" type="button" onClick={() => setReviewDecision(null)}>Cancelar</button>
               <button
                 className="btn-primary"

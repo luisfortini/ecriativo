@@ -73,6 +73,9 @@ export interface ClientProfile {
   brand_memory_summary: string | null;
   site_url: string | null;
   instagram_url: string | null;
+  contact_phone?: string | null;
+  instagram_handle?: string | null;
+  address?: string | null;
   brand_analyses?: ClientBrandAnalysis[];
   created_at: string;
   updated_at: string;
@@ -157,6 +160,7 @@ export interface NormalizedBriefing {
 }
 
 export interface ClientPromptContext {
+  contato_publico?: ReturnType<typeof import("./services/brandContact.js").brandContactContext>;
   nome: string;
   segmento: string;
   descricao_resumida_negocio: string;

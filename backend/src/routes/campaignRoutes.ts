@@ -65,7 +65,7 @@ import {
   updateWhatsappSettingsController
 } from "../controllers/whatsappController.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
-import { addOrganizationMemberController, listOrganizationMembersController } from "../controllers/organizationController.js";
+import { addOrganizationMemberController, listOrganizationMembersController, updateAccountTypeController } from "../controllers/organizationController.js";
 import { requireOrganizationRole } from "../middleware/organizationRoleMiddleware.js";
 
 const uploadDir = config.uploadFilesDir;
@@ -80,6 +80,7 @@ export const campaignRoutes = Router();
 const requireManager = requireOrganizationRole("owner", "admin");
 
 campaignRoutes.get("/organization/members", requireManager, asyncHandler(listOrganizationMembersController));
+campaignRoutes.patch("/organization/experience", requireOrganizationRole("owner"), asyncHandler(updateAccountTypeController));
 campaignRoutes.post("/organization/members", requireManager, asyncHandler(addOrganizationMemberController));
 
 campaignRoutes.get("/campaigns", asyncHandler(listCampaignsController));

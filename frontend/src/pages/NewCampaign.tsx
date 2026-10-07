@@ -8,6 +8,7 @@ import { createCampaign, getClient, getClients } from "../services/api";
 import type { ClientProfile, ClientSummary } from "../types";
 import { VisualSelector, emptySelection } from "../components/VisualLibrary";
 import { useResolveErrorFeedback } from "../components/FeedbackProvider";
+import { useStudio } from "../studio/StudioContext";
 
 const formats = ["1:1", "4:5", "9:16", "16:9"] as const;
 
@@ -26,6 +27,7 @@ const initialForm = {
 };
 
 export function NewCampaign() {
+  const {brand,isCompany}=useStudio();
   const resolveError = useResolveErrorFeedback();
   const [step, setStep] = useState(0);
   const [invalid, setInvalid] = useState({client: false, idea: false});
@@ -37,7 +39,7 @@ export function NewCampaign() {
     }
   }, [invalid, step]);
   const [visualSelection,setVisualSelection]=useState(emptySelection);
-  const [form, setForm] = useState(initialForm);
+  const [form, setForm] = useState({...initialForm,client_id:brand?String(brand.id):""});
   const [clients, setClients] = useState<ClientSummary[]>([]);
   const [memory, setMemory] = useState<ClientProfile | null>(null);
   const [file, setFile] = useState<File | null>(null);
@@ -118,8 +120,8 @@ export function NewCampaign() {
           <h2 className="mb-4 text-lg font-semibold">{["Para quem e sobre o quê?", "Como seu anúncio deve aparecer?", "Confira antes de gerar"][step]}</h2>
           {step === 0 && <div className="grid gap-4 md:grid-cols-2">
             <div className="md:col-span-2">
-              <label className="label" htmlFor="campaign-client">Cliente</label>
-              <select id="campaign-client" className="field" required aria-invalid={invalid.client} aria-describedby={invalid.client ? "client-error" : undefined} value={form.client_id} onChange={(event) => {update("client_id", event.target.value);setInvalid(current => ({...current, client: false}));}}>
+              <label className="label" htmlFor="campaign-client">{isCompany?"Sua marca":"Marca do anúncio"}</label>
+              <select id="campaign-client" className="field" required disabled={isCompany} aria-invalid={invalid.client} aria-describedby={invalid.client ? "client-error" : undefined} value={form.client_id} onChange={(event) => {update("client_id", event.target.value);setInvalid(current => ({...current, client: false}));}}>
                 <option value="">Selecione um cliente</option>
                 {clients.map((client) => (
                   <option key={client.id} value={client.id}>
@@ -179,6 +181,8 @@ export function NewCampaign() {
             <h2 className="mb-3 font-semibold text-ink">Padrões da marca</h2>
             {memory ? (
               <div className="space-y-3 text-sm text-slate-700">
+                <Memory label="Idioma" value={memory.content_language||"Português brasileiro"}/>
+                <Memory label="Contato público" value={[memory.contact_phone,memory.instagram_handle&&"@"+memory.instagram_handle,memory.address].filter(Boolean).join(" · ")||null}/>
                 <Memory label="Segmento" value={memory.segment} />
                 <Memory label="Público" value={memory.target_audience} />
                 <Memory label="Tom" value={memory.brand_voice} />
@@ -202,6 +206,7 @@ export function NewCampaign() {
           </div>}
         </aside>
         <div className="action-bar flex flex-wrap items-center justify-between gap-3 xl:col-span-2">
+          {error&&<p role="alert" className="studio-inline-error w-full">{error}</p>}
           <span className="text-sm text-slate-600">Etapa {step + 1} de 3</span>
           <div className="flex flex-wrap gap-2">{step > 0 && <button type="button" className="btn-secondary" disabled={loading} onClick={() => setStep(current => current - 1)}>Voltar</button>}<button
             className="btn-primary"
