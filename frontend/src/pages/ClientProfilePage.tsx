@@ -453,8 +453,9 @@ function TextField(props: { field: keyof typeof fields; value: string; onChange:
       {isLong ? (
         <textarea id={"brand-"+props.field} className="field min-h-28" maxLength={props.field==="address"?500:undefined} placeholder={props.field==="address"?"Rua, número, bairro e complemento. Inclua cidade se desejar.":undefined} value={props.value} onChange={(event) => props.onChange((current) => ({ ...current, [props.field]: event.target.value }))} />
       ) : (
-        <input id={"brand-"+props.field} className="field" type={props.field==="contact_phone"?"tel":"text"} required={props.field==="name"} minLength={props.field==="name"?2:undefined} maxLength={props.field==="contact_phone"?40:props.field==="instagram_handle"?31:undefined} placeholder={props.field==="contact_phone"?"+55 (19) 99999-9999":props.field==="instagram_handle"?"@suamarca":undefined} value={props.value} onChange={(event) => props.onChange((current) => ({ ...current, [props.field]: event.target.value }))} />
+        <input id={"brand-"+props.field} className="field" type={props.field==="contact_phone"?"tel":"text"} autoComplete={props.field==="contact_phone"?"tel":undefined} aria-describedby={props.field==="contact_phone"?"brand-phone-help":undefined} required={props.field==="name"} minLength={props.field==="name"?2:undefined} maxLength={props.field==="contact_phone"?40:props.field==="instagram_handle"?31:undefined} placeholder={props.field==="contact_phone"?"Ex.: +1 (401) 555-0123":props.field==="instagram_handle"?"@suamarca":undefined} value={props.value} onChange={(event) => props.onChange((current) => ({ ...current, [props.field]: event.target.value }))} />
       )}
+      {props.field==="contact_phone"&&<p id="brand-phone-help" className="helper">Aceita números de qualquer país, com ou sem +código do país. Ex.: 401-555-0123, +351 912 345 678 ou +55 (11) 99999-9999. Não adicionamos um país automaticamente.</p>}
     </div>
   );
 }

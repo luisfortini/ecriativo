@@ -124,11 +124,15 @@ function Field(props: {
         id={`client-${props.name}`}
         required={props.required}
         type={props.name==="contact_phone"?"tel":"text"}
+        placeholder={props.name==="contact_phone"?"Ex.: +1 (401) 555-0123":undefined}
+        autoComplete={props.name==="contact_phone"?"tel":undefined}
+        aria-describedby={props.name==="contact_phone"?"client-phone-help":undefined}
         minLength={props.name==="name"?2:undefined}
         maxLength={props.name==="address"?500:props.name==="contact_phone"?40:props.name==="instagram_handle"?31:undefined}
         value={props.value}
         onChange={(event) => props.onChange((current) => ({ ...current, [props.name]: event.target.value }))}
       />
+      {props.name==="contact_phone"&&<p id="client-phone-help" className="helper">Aceita números de qualquer país, com ou sem +código do país. Ex.: 401-555-0123, +351 912 345 678 ou +55 (11) 99999-9999. O formato informado será usado nas publicações.</p>}
     </div>
   );
 }

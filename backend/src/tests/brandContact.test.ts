@@ -1,11 +1,31 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { z } from "zod";
-import { brandContactFields, brandContactContext } from "../services/brandContact.js";
+import { brandContactFields, brandContactContext, normalizeContactPhone } from "../services/brandContact.js";
 import { socialBrandContract, socialImagePrompt } from "../services/socialBrandContract.js";
 import type { ClientProfile } from "../types.js";
 
 const schema = z.object(brandContactFields);
+test("números internacionais e locais conservam código e formatação", () => {
+  for(const phone of ["401-347-8579","401-555-0123","+1 (401) 555-0123","+44 20 7946 0958","+351 912 345 678","+55 (11) 99999-9999","001 401 555 0123","(401) 555-0123"]) {
+    assert.equal(schema.parse({contact_phone:phone}).contact_phone,phone);
+  }
+});
+test("telefone copiado aceita variantes Unicode sem inventar código do país", () => {
+  for(const separator of ["\u2010","\u2011","\u2012","\u2013","\u2014","\u2212"]) {
+    assert.equal(schema.parse({contact_phone:"401"+separator+"555"+separator+"0123"}).contact_phone,"401-555-0123");
+  }
+  assert.equal(schema.parse({contact_phone:"\u200e＋１ (４０１) ５５５‑０１２３\u200b"}).contact_phone,"+1 (401) 555-0123");
+  assert.equal(schema.parse({contact_phone:"+351\u00a0912\u202f345\u00a0678"}).contact_phone,"+351 912 345 678");
+  assert.equal(normalizeContactPhone("  \u200e\u200b  "),"");
+});
+test("mensagem do telefone mostra exemplos sem impor código brasileiro", () => {
+  for(const phone of ["++1 401 555 0123","401+5550123","401-ABC-0123","123","x".repeat(41)]) {
+    assert.equal(schema.safeParse({contact_phone:phone}).success,false);
+  }
+  const error=schema.safeParse({contact_phone:"123"});
+  if(!error.success)assert.match(error.error.issues[0].message,/401-555-0123/);
+});
 test("contatos públicos opcionais e Instagram normalizado", () => {
   assert.deepEqual(schema.parse({}), {});
   assert.equal(schema.parse({instagram_handle:" @cafe.da_serra "}).instagram_handle, "cafe.da_serra");
