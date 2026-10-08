@@ -13,6 +13,8 @@
     "typecheck": "tsc --noEmit",
     "test:tenant": "tsx --test src/tests/organizationRole.test.ts src/tests/editorialCalendar.test.ts",
     "test:studio": "tsx --test src/tests/brandContact.test.ts",
+    "test:campaign-corrections": "tsx --test src/tests/campaignCorrection.test.ts",
+    "smoke:campaign-corrections": "tsx src/scripts/smokeCampaignCorrections.ts",
     "smoke:studio": "tsx src/scripts/smokeStudio.ts",
     "test:social-publishing": "tsx --test src/tests/socialPublishing.test.ts",
     "smoke:social-publishing": "tsx src/scripts/smokeSocialPublishing.ts",

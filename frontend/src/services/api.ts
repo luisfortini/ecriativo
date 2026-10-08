@@ -133,6 +133,12 @@ export function updateCampaignStatus(id: number, status: "approved" | "rejected"
   });
 }
 
+export function correctCampaignImage(id: number, note: string, baseImageUrl: string) {
+  return request<{ correction: NonNullable<CampaignDetail["image_corrections"]>[number] }>(`/campaigns/${id}/image-corrections`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ note, base_image_url: baseImageUrl })
+  });
+}
+
 export function getClients() {
   return request<ClientSummary[]>("/clients");
 }

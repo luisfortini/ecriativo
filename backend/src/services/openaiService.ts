@@ -121,8 +121,9 @@ export async function generateImage(
   prompt: string,
   format: CampaignFormat,
   metadata?: { clientId?: number | null; campaignId?: number | null; campaignPlanId?: number | null; queueId?: number | null; operationType?: AiOperationType },
-  visual?: { references: VisualReference[]; mode: "reference" | "composition"; no_people: boolean; creative_filename?:string; style_filename?:string; style_kind?:"generated"|"uploads"; brand_logo_filename?:string; social_layout?:boolean }
+  visual?: { references: VisualReference[]; mode: "reference" | "composition"; no_people: boolean; creative_filename?:string; require_creative?:boolean; style_filename?:string; style_kind?:"generated"|"uploads"; brand_logo_filename?:string; social_layout?:boolean }
 ) {
+  if (visual?.require_creative && !visual.creative_filename) throw new Error("A correção precisa da imagem original; nenhuma nova geração foi iniciada.");
   if (!client && (visual?.references.length || visual?.creative_filename || metadata?.operationType==="rotina_agendada")) throw new Error("Configure a integração de imagens para gerar ou corrigir os criativos.");
   if (!client) return createLocalPlaceholder(prompt, format);
   const started = Date.now();
@@ -131,12 +132,12 @@ export async function generateImage(
     const refs = visual?.references ?? [];
     await Promise.all(refs.map(ref=>ensureMediaPath("uploads",ref.filename)));
     let creative:Buffer|undefined;
-    if(visual?.creative_filename && (visual.social_layout || visual.mode==="reference" || !refs.length)) {
+    if(visual?.creative_filename && (visual.require_creative || visual.social_layout || visual.mode==="reference" || !refs.length)) {
       try {creative=await sharp((await readMedia("generated",visual.creative_filename)).data).png().toBuffer();}
-      catch(error) {if(!(error instanceof AppError && error.statusCode===404))throw error;}
+      catch(error) {if(visual.require_creative || !(error instanceof AppError && error.statusCode===404))throw error;}
     }
     const style=visual?.style_filename ? await sharp((await readMedia(visual.style_kind||"generated",visual.style_filename)).data).png().toBuffer() : undefined;
-    const modelRefs=visual?.mode==="composition" && visual.social_layout ? [] : refs;
+    const modelRefs=visual?.mode==="composition" && (visual.social_layout || visual.require_creative) ? [] : refs;
     const compositionInstruction=visual?.mode==="composition" && refs.length && !creative
       ? visual.social_layout ? "Crie o layout e os textos da arte; reserve a região central para as fotos reais, sem desenhar produtos ou pessoas. As fotos serão aplicadas pelo sistema." : "Crie apenas um fundo, sem produtos, pessoas, textos ou logos. As fotos reais serão aplicadas depois." : "";
     const visualPrompt = `${prompt}\n${compositionInstruction}\n${visual?.no_people ? "Não incluir pessoas, rostos ou silhuetas humanas." : ""}\n${style ? `Imagem ${creative?2:1}: referência SOMENTE de identidade visual, cores, tipografia e margens. Não copie os textos nem as marcas presentes na referência. O perfil atual prevalece sobre a referência. Não desenhe logos, inclusive os presentes na imagem de referência; a logo oficial será aplicada depois.` : ""}\n${modelRefs.map((ref, index) => `Referência ${index + 1 + (creative ? 1 : 0) + (style?1:0)}: ${ref.kind === "person" ? "pessoa" : "produto"} ${ref.name}. Preserve: ${ref.preservation_notes}`).join("\n")}`;
@@ -177,7 +178,7 @@ export async function generateImage(
       const remote=image.b64_json ? undefined : await fetch(image.url!,{signal:AbortSignal.timeout(15000)});
       if(remote && !remote.ok)throw new Error("Não foi possível armazenar a imagem retornada pelo provedor.");
       let buffer = image.b64_json ? Buffer.from(image.b64_json, "base64") : Buffer.from(await remote!.arrayBuffer());
-      if (visual?.mode === "composition" && refs.length && !(creative && visual.social_layout)) {
+      if (visual?.mode === "composition" && refs.length && !(creative && (visual.social_layout || visual.require_creative))) {
         const unique = refs.filter((ref, index) => refs.findIndex(r => r.subject_id === ref.subject_id) === index);
         const width = 1024;
         const height = format === "4:5" ? 1280 : format === "9:16" ? 1824 : format === "16:9" ? 576 : 1024;

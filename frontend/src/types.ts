@@ -170,6 +170,7 @@ export interface NormalizedBriefing {
 }
 
 export interface CampaignDetail extends CampaignSummary {
+  image_corrections?: CampaignImageCorrection[];
   creative_status: "draft" | "waiting_review" | "approved" | "rejected";
   error_message: string | null;
   free_briefing: string | null;
@@ -187,6 +188,13 @@ export interface CampaignDetail extends CampaignSummary {
   generated_image_url?: string | null;
   final_image_url?: string | null;
   reviews: CampaignReview[];
+}
+
+export interface CampaignImageCorrection {
+  id: number; campaign_id: number; note: string;
+  status: "queued" | "processing" | "completed" | "failed";
+  before_image_url: string; image_url: string | null; error_message: string | null;
+  created_at: string; started_at: string | null; finished_at: string | null; requester_name?: string | null;
 }
 
 export interface CampaignReview {

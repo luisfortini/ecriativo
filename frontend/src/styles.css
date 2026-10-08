@@ -190,6 +190,16 @@ body { font-family: Inter, "Segoe UI", system-ui, sans-serif; color: #171b2a; li
 .studio-campaign-technical { order: 2; }
 .studio-campaign-content { display: grid; grid-template-columns: minmax(0,1.1fr) minmax(0,1fr); gap: 26px; align-items: start; }
 
+.ad-correction-progress { display: flex; gap: 12px; align-items: flex-start; padding: 14px; margin-bottom: 16px; border: 1px solid #d5dfef; border-radius: 12px; color: #293c5b; background: #eff3f9; font-size: 13px; }
+.ad-correction-progress>svg { flex-shrink: 0; margin-top: 2px; }
+.ad-correction-progress p { margin-top: 5px; font-size: 12px; line-height: 1.7; }
+.ad-correction-history { padding: 14px; border: 1px solid #e3e7ee; border-radius: 12px; }
+.ad-correction-history header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; }
+.ad-correction-history time { font-size: 10px; color: #687489; }
+.ad-correction-comparison { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 10px; margin-top: 12px; }
+.ad-correction-comparison figcaption { margin-bottom: 6px; color: #687489; font-size: 11px; }
+.ad-correction-history-image { width: 100%; height: 170px; object-fit: contain; border-radius: 8px; background: #edf1f6; }
+.ad-review-actions:disabled { opacity: .55; }
 .brand-asset-count { display: inline-block; margin-left: 6px; border-radius: 20px; padding: 2px 8px; background: #eef1f6; color: #526077; font-size: 11px; vertical-align: middle; }
 .brand-asset-list { display: grid; gap: 16px; }
 .brand-asset-card { min-width: 0; overflow: hidden; border: 1px solid var(--studio-border); border-radius: 14px; }

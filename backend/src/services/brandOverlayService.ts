@@ -134,7 +134,7 @@ export async function applyBrandOverlay(input: BrandOverlayInput): Promise<Brand
   }
 }
 
-export async function validateMainLogoFile(filePath: string) {
+export async function validateMainLogoFile(filePath: string | Buffer) {
   const [metadata, stats] = await Promise.all([sharp(filePath).metadata(), sharp(filePath).stats()]);
   if (metadata.format !== "png") throw new Error("A logo principal deve ser um arquivo PNG.");
   if (!metadata.hasAlpha || stats.isOpaque) throw new Error("A logo principal deve possuir fundo transparente.");

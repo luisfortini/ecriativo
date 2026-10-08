@@ -4,8 +4,10 @@ import { processDueQueue } from "./campaignPlannerService.js";
 import { sendDailySummary } from "./whatsappNotificationService.js";
 import { processEditorialQueue } from "./editorialService.js";
 import { processSocialPublications } from "./socialPublishingService.js";
+import { processCampaignImageCorrections } from "./campaignCorrectionService.js";
 
 export function startQueueWorker() {
+  const correctionTask = cron.schedule("* * * * *", () => { void processCampaignImageCorrections().catch(() => console.error("Falha na fila de correções de anúncios; consulte o histórico.")); });
   const publishingTask = cron.schedule("* * * * *",()=>{void processSocialPublications().catch(()=>console.error("Falha na fila de publicação social; consulte o histórico."));});
   const editorialTask = cron.schedule("* * * * *", () => {
     void processEditorialQueue().catch(error => console.error("Erro no worker editorial",error));
@@ -21,7 +23,7 @@ export function startQueueWorker() {
     });
   });
 
-  return [queueTask, dailySummaryTask, editorialTask,publishingTask];
+  return [queueTask, dailySummaryTask, editorialTask,publishingTask,correctionTask];
 }
 
 export async function sendDailySummaries() {

@@ -396,6 +396,8 @@ export async function getCampaign(id: number) {
     creative: JSON.parse(creativeJson),
     normalized_briefing: campaign.normalized_briefing_json ? JSON.parse(campaign.normalized_briefing_json) : null,
     pipeline_run: await getLatestCampaignPipelineRun(id),
+    image_corrections: await all(`SELECT r.id,r.campaign_id,r.note,r.status,r.before_image_url,r.image_url,r.error_message,r.created_at,r.started_at,r.finished_at,u.name requester_name
+      FROM campaign_image_corrections r LEFT JOIN users u ON u.id=r.user_id WHERE r.campaign_id=? ORDER BY r.id DESC`, [id]),
     reviews: await all(
       `SELECT r.*, u.name reviewer_name
        FROM campaign_reviews r
@@ -436,10 +438,10 @@ export async function updateCampaignStatus(
 ) {
   const normalizedReason = reason?.trim() || null;
   if (status === "rejected" && !normalizedReason) throw new AppError("Informe o motivo da reprovação.", 422);
-  const campaign = await get<{ client_id: number | null }>("SELECT client_id FROM campaigns WHERE id = ?", [campaignId]);
-  if (!campaign) throw new AppError("Campanha não encontrada.", 404);
-
   await transaction(async (client) => {
+    const campaign = await get<{ client_id: number | null }>("SELECT client_id FROM campaigns WHERE id = ? FOR UPDATE", [campaignId], client);
+    if (!campaign) throw new AppError("Campanha não encontrada.", 404);
+    if (await get("SELECT id FROM campaign_image_corrections WHERE campaign_id=? AND status IN ('queued','processing')", [campaignId], client)) throw new AppError("Aguarde a correção terminar antes de avaliar a arte.", 409);
     await run(
       "UPDATE campaigns SET creative_status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
       [status, campaignId],

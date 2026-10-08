@@ -4,6 +4,7 @@ import multer from "multer";
 import { config } from "../config.js";
 import {
   createCampaignController,
+  correctCampaignImageController,
   creativeNavigationController,
   duplicateCampaignController,
   getCampaignController,
@@ -89,6 +90,7 @@ campaignRoutes.get("/campaigns/:id", asyncHandler(getCampaignController));
 campaignRoutes.get("/campaigns/:id/navigation", asyncHandler(creativeNavigationController));
 campaignRoutes.get("/campaigns/:id/duplicate", asyncHandler(duplicateCampaignController));
 campaignRoutes.post("/campaigns/:id/learning", asyncHandler(saveCampaignLearningController));
+campaignRoutes.post("/campaigns/:id/image-corrections", requireManager, asyncHandler(correctCampaignImageController));
 campaignRoutes.patch("/campaigns/:id/status", requireManager, asyncHandler(updateCampaignStatusController));
 campaignRoutes.post("/campaigns/:id/send-whatsapp", requireManager, asyncHandler(sendCampaignWhatsappController));
 campaignRoutes.get("/creatives", asyncHandler(listCreativesController));

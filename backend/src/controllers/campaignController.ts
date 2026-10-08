@@ -12,6 +12,14 @@ import {
 } from "../services/campaignService.js";
 import { AppError } from "../utils/errors.js";
 import { selectionInput } from "../services/visualLibraryService.js";
+import { requestCampaignCorrection } from "../services/campaignCorrectionService.js";
+
+export async function correctCampaignImageController(req: Request, res: Response) {
+  const id = z.coerce.number().int().positive().safeParse(req.params.id);
+  if (!id.success) throw new AppError("Anúncio inválido.", 422);
+  const correction = await requestCampaignCorrection(id.data, req.body, req.user?.id ?? null);
+  res.status(202).json({ correction });
+}
 
 const campaignSchema = z.object({
   visual_selection: selectionInput,

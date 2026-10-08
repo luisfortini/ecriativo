@@ -1,10 +1,11 @@
 import { Check, ChevronLeft, ChevronRight, Copy, ExternalLink, MessageCircle, Repeat2, Save, ThumbsDown, ThumbsUp, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { LoadingBlock } from "../components/LoadingBlock";
 import { PageHeader } from "../components/PageHeader";
 import { SafeImage } from "../components/SafeImage";
+import { CampaignImageCorrection } from "../components/CampaignImageCorrection";
 import { getCampaign, getCreativeNavigation, saveCampaignLearning, sendCampaignWhatsapp, updateCampaignStatus } from "../services/api";
 import type { CampaignDetail, CreativeBriefArtifact, CreativeNavigation, CreativeOutputArtifact } from "../types";
 import { uiLabel } from "../utils/uiLabels";
@@ -21,6 +22,11 @@ export function CampaignResult() {
   const [confirmedActions, setConfirmedActions] = useState<Record<string, string>>({});
   const [reviewDecision, setReviewDecision] = useState<"approved" | "rejected" | null>(null);
   const [reviewReason, setReviewReason] = useState("");
+  const correctionActive = campaign?.image_corrections?.some(item => item.status === "queued" || item.status === "processing") || false;
+  const updateCorrectedCampaign = useCallback((updated: CampaignDetail) => {
+    setCampaign(updated);
+    setConfirmedActions(current => ({ ...current, status_approved: "", status_rejected: "" }));
+  }, []);
 
   function load() {
     if (!id) return;
@@ -236,10 +242,10 @@ export function CampaignResult() {
             </div>
             <div className="border-t border-slate-200 bg-white p-4">
               <div className="mb-3 grid grid-cols-2 gap-2">
-                <button className="btn-primary" type="button" onClick={sendWhatsapp}>
+                <button className="btn-primary" type="button" disabled={correctionActive} onClick={sendWhatsapp}>
                   <MessageCircle size={14} /> Enviar via WhatsApp
                 </button>
-                <button className="inline-flex items-center justify-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700" type="button" onClick={sendWhatsapp}>
+                <button className="inline-flex items-center justify-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700" type="button" disabled={correctionActive} onClick={sendWhatsapp}>
                   <MessageCircle size={14} /> Reenviar
                 </button>
                 <button className="inline-flex items-center justify-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700" type="button" onClick={() => navigator.clipboard.writeText(adCaption)}>
@@ -266,9 +272,13 @@ export function CampaignResult() {
             </div>
           </section>
 
+          <div className="space-y-4">
+          <CampaignImageCorrection key={campaign.id} campaign={campaign} onUpdated={updateCorrectedCampaign} />
           <section className="panel p-4">
             <h2 className="mb-3 font-bold text-ink">A arte está pronta para usar?</h2><p className="helper mb-4">Confira o texto, a marca e os dados de contato antes de aprovar. Aprovar não ativa uma campanha paga.</p>
             <p className="mb-3 text-sm text-slate-600">Situação atual: <strong>{creativeStatusLabel(campaign.creative_status)}</strong></p>
+            {correctionActive && <p className="helper mb-3">Aguarde a correção terminar para aprovar, reprovar ou enviar a arte.</p>}
+            <fieldset disabled={correctionActive} className="ad-review-actions">
             <div className="grid grid-cols-2 gap-2">
               <Action icon={<Check size={15} />} label="Aprovar" pending={pendingAction === "status_approved"} confirmedLabel={confirmedActions.status_approved} onClick={() => { setError(""); setReviewDecision("approved"); setReviewReason(""); }} />
               <Action icon={<X size={15} />} label="Reprovar" pending={pendingAction === "status_rejected"} confirmedLabel={confirmedActions.status_rejected} onClick={() => { setError(""); setReviewDecision("rejected"); setReviewReason(""); }} />
@@ -283,9 +293,11 @@ export function CampaignResult() {
               <Action full icon={<Save size={15} />} label="Salvar observação estratégica" pending={pendingAction === "save_note"} confirmedLabel={confirmedActions.save_note} onClick={() => learn("save_note", "Observação estratégica")} />
               <Action full icon={<Save size={15} />} label="Salvar direção visual no cliente" pending={pendingAction === "save_visual_direction"} confirmedLabel={confirmedActions.save_visual_direction} onClick={() => learn("save_visual_direction", "Direção visual")} />
             </div></details>
+            </fieldset>
             {campaign.reviews?.length > 0 && (
               <div className="mt-5 border-t border-slate-200 pt-4">
                 <h3 className="mb-2 text-sm font-bold text-ink">Histórico de avaliações</h3>
+                {campaign.image_corrections?.length ? <p className="mb-3 text-xs text-slate-500">Avaliações anteriores não aprovam automaticamente uma versão corrigida.</p> : null}
                 <div className="max-h-56 space-y-2 overflow-auto">
                   {campaign.reviews.map((review) => (
                     <div key={review.id} className="rounded-md bg-slate-50 px-3 py-2 text-xs text-slate-700">
@@ -298,6 +310,7 @@ export function CampaignResult() {
               </div>
             )}
           </section>
+          </div>
         </aside>
       </div>
       {reviewDecision && (
@@ -322,7 +335,7 @@ export function CampaignResult() {
               <button
                 className="btn-primary"
                 type="button"
-                disabled={Boolean(pendingAction) || (reviewDecision === "rejected" && !reviewReason.trim())}
+                disabled={correctionActive || Boolean(pendingAction) || (reviewDecision === "rejected" && !reviewReason.trim())}
                 onClick={() => void submitReview()}
               >
                 {pendingAction ? "Salvando..." : "Confirmar avaliação"}

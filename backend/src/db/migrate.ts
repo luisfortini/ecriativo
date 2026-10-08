@@ -20,6 +20,7 @@ const creativeSchema = JSON.stringify(CreativeOutputSchema, null, 2);
 const brandAnalyzerSchema = JSON.stringify(ProfileDiagnosticSchema, null, 2);
 
 import { studioMigration } from "./studioMigration.js";
+import { campaignCorrectionMigration } from "./campaignCorrectionMigration.js";
 
 const migrations: Migration[] = [
   {
@@ -849,7 +850,7 @@ export async function migrate() {
   await exec("CREATE TABLE IF NOT EXISTS schema_migrations (id TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP)");
   const appliedRows = await all<{ id: string }>("SELECT id FROM schema_migrations");
   const applied = new Set(appliedRows.map((row) => row.id));
-  for (const migration of [...migrations, contentMigration, mediaCorrectionMigration, socialBrandMigration, socialPublishingMigration, studioMigration]) {
+  for (const migration of [...migrations, contentMigration, mediaCorrectionMigration, socialBrandMigration, socialPublishingMigration, studioMigration, campaignCorrectionMigration]) {
     if (applied.has(migration.id)) continue;
     await exec(migration.up);
     await run("INSERT INTO schema_migrations (id) VALUES (?)", [migration.id]);
