@@ -8,6 +8,7 @@ import type { CampaignSummary, ClientProfile } from "../types";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { PageHeader } from "../components/PageHeader";
 import { LoadingBlock } from "../components/LoadingBlock";
+import { UnifiedCreation } from "./NewCampaign";
 
 export function StudioHome() {
   const { user } = useAuth();
@@ -54,10 +55,10 @@ export function StudioHome() {
 export function CreationChoices() {
   const { brand, canManage } = useStudio();
   return <div className="studio-create-choices">
-    {canManage && <Link to={brand ? "/social-media?view=plans&new=1" : "/clientes"} className="studio-choice"><span className="studio-choice-icon"><ImagePlus size={26}/></span><h3>Conteúdo para redes sociais</h3><p>Posts, carrosséis e stories para aproximar pessoas da sua marca. Organize uma semana inteira.</p><span className="studio-text-link">Criar conteúdo <ArrowRight size={17}/></span></Link>}
-    <Link to={brand ? "/nova-campanha?client_id=" + brand.id : "/clientes"} className="studio-choice"><span className="studio-choice-icon"><Megaphone size={26}/></span><h3>Arte para anúncio</h3><p>Apresente um produto, serviço ou oferta com clareza. A arte não ativa uma campanha paga.</p><span className="studio-text-link">Criar anúncio <ArrowRight size={17}/></span></Link>
+    {canManage && <Link to={brand ? "/criar?purpose=social" : "/clientes"} className="studio-choice"><span className="studio-choice-icon"><ImagePlus size={26}/></span><h3>Conteúdo para redes sociais</h3><p>Posts, carrosséis e stories para aproximar pessoas da sua marca. Organize uma semana inteira.</p><span className="studio-text-link">Criar conteúdo <ArrowRight size={17}/></span></Link>}
+    <Link to={brand ? "/criar?purpose=ads" : "/clientes"} className="studio-choice"><span className="studio-choice-icon"><Megaphone size={26}/></span><h3>Arte para anúncio</h3><p>Apresente um produto, serviço ou oferta com clareza. A arte não ativa uma campanha paga.</p><span className="studio-text-link">Criar anúncio <ArrowRight size={17}/></span></Link>
   </div>;
 }
 export function StudioCreate() {
-  return <><PageHeader title="O que você quer criar?" description="Escolha o objetivo. Vamos guiar você da ideia até a revisão."/><CreationChoices/><p className="helper mt-6">A geração utiliza IA e pode ter custos. Nada será publicado sem um agendamento aprovado.</p></>;
+  return <UnifiedCreation/>;
 }

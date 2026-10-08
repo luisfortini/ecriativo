@@ -10,7 +10,7 @@ import { ErrorBanner } from "../components/ErrorBanner";
 import { EmptyState } from "../components/EmptyState";
 import { LoadingBlock } from "../components/LoadingBlock";
 import { useResolveErrorFeedback } from "../components/FeedbackProvider";
-import { Link, useLocation } from "react-router-dom";
+import { Link, Navigate, useLocation } from "react-router-dom";
 import { useStudio } from "../studio/StudioContext";
 import { Steps } from "../components/Steps";
 
@@ -60,10 +60,10 @@ export function SocialMedia({embedded=false}:{embedded?:boolean}) {
   const [form,setForm]=useState({...initial,client_id:brand?String(brand.id):""});
   const [visual,setVisual]=useState(emptySelection);
   const [editing,setEditing]=useState<number|null>(null);
-  const [selected,setSelected]=useState<number|null>(null);
+  const [selected,setSelected]=useState<number|null>(()=>Number(new URLSearchParams(location.search).get("plan_id"))||null);
   const [calendar,setCalendar]=useState<Calendar|null>(null);
   const [error,setError]=useState("");
-  const [success,setSuccess]=useState("");
+  const [success,setSuccess]=useState(new URLSearchParams(location.search).get("created")==="1"?"Planejamento salvo e pausado. Para começar, abra Configurar planos, ative o plano e depois use Planejar semana. Nada foi gerado ou publicado.":"");
   const [busy,setBusy]=useState(false);
   const [week,setWeek]=useState("");
   const [correctionNote,setCorrectionNote]=useState("");
@@ -88,6 +88,7 @@ export function SocialMedia({embedded=false}:{embedded?:boolean}) {
     finally {setBusy(false);}
   }
   function edit(plan:Plan) {setView("plans");setPlanStep(0);setEditing(Number(plan.id));setForm({client_id:String(plan.client_id),name:plan.name,posts_per_week:plan.posts_per_week,pillars:plan.pillars.join("\n"),formats:plan.formats,weekly_image_limit:plan.weekly_image_limit,automatic:plan.automatic,active:plan.active});setVisual({...emptySelection,...plan.visual_selection});}
+  if(new URLSearchParams(location.search).get("new")==="1")return <Navigate to="/criar?purpose=social" replace/>;
   return <>
     {!embedded&&<PageHeader title={view==="plans"?"Vamos criar sua semana de conteúdo":"Conteúdos da sua marca"} description="Da ideia à aprovação: tendências, datas locais e a identidade da marca acompanham cada publicação."/>}
     {error&&<ErrorBanner message={error}/>}
@@ -95,7 +96,7 @@ export function SocialMedia({embedded=false}:{embedded?:boolean}) {
     <div className="mb-6 flex flex-wrap items-end justify-between gap-4"><div role="group" aria-label="Área de social media" className="flex flex-wrap gap-2"><button type="button" className={view==="review"?"btn-primary":"btn-secondary"} aria-pressed={view==="review"} onClick={()=>setView("review")}>Revisar conteúdos</button><button type="button" className={view==="plans"?"btn-primary":"btn-secondary"} aria-pressed={view==="plans"} onClick={()=>setView("plans")}>Configurar planos</button></div>{plans.length>0&&<label className="label m-0 w-full sm:w-72">Plano de conteúdo<select className="field" disabled={busy} value={selected??""} onChange={e=>setSelected(Number(e.target.value))}>{plans.map(plan=><option key={plan.id} value={plan.id}>{plan.client_name} · {plan.name}</option>)}</select></label>}</div>
     {busy&&<p role="status" className="mb-4 rounded-xl bg-slate-100 p-3 text-sm text-slate-700">Estamos processando sua solicitação. Aguarde para realizar outra ação.</p>}
     {loading?<LoadingBlock/>:<div className={`grid gap-6 ${view==="plans"?"xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]":""}`}>
-      {view==="plans"&&<div className="space-y-5">
+      {view==="plans"&&editing&&<div className="space-y-5">
         <form className="panel space-y-4 p-5 sm:p-7" onSubmit={e=>{e.preventDefault();if(!form.client_id||!form.name.trim()||!form.pillars.trim()){setError("Informe o nome do plano e pelo menos um assunto para a marca.");setPlanStep(0);return;}if(!form.formats.length){setError("Escolha pelo menos um formato para as publicações.");setPlanStep(1);return;}if(planStep<2){setPlanStep(current=>current+1);return;}void perform(async()=>{const saved=await request<{id:number}>(editing?`/social-media/plans/${editing}`:"/social-media/plans",{method:editing?"PUT":"POST",...json({...form,client_id:Number(form.client_id),pillars:form.pillars.split("\n").map(s=>s.trim()).filter(Boolean),visual_selection:visual})});setSelected(Number(saved.id));setEditing(null);setForm({...initial,client_id:brand?String(brand.id):""});setPlanStep(0);setVisual(emptySelection);setView("review");});}}>
           <Steps labels={["Ideia","Imagens","Confirmar"]} current={planStep} onChange={setPlanStep} disabled={busy}/>
           <h2 className="font-bold">{editing?"Editar plano":"Novo plano editorial"}</h2>
@@ -111,7 +112,7 @@ export function SocialMedia({embedded=false}:{embedded?:boolean}) {
           <div className="flex flex-wrap gap-3">{[['post','Post'],['carousel','Carrossel (3 artes)'],['story','Story']].map(([value,label])=><label className="studio-option" key={value}><input type="checkbox" checked={form.formats.includes(value)} onChange={e=>setForm({...form,formats:e.target.checked?[...form.formats,value]:form.formats.filter(f=>f!==value)})}/> {label}</label>)}</div>
           <label className="label">Limite de imagens por semana<input type="number" min={1} max={100} required className="field" value={form.weekly_image_limit} onChange={e=>setForm({...form,weekly_image_limit:Number(e.target.value)})}/></label>
           <p className="text-xs text-slate-500">Cada arte e nova tentativa consome uma unidade. Pesquisa e texto também têm custos registrados em Custos de IA.</p>
-          <VisualSelector clientId={Number(form.client_id)} value={visual} onChange={setVisual}/>
+          <VisualSelector clientId={Number(form.client_id)} purpose="social" value={visual} onChange={setVisual}/>
           </fieldset><fieldset hidden={planStep!==2} disabled={planStep!==2} className="space-y-4">
           <div className="studio-summary"><strong>{form.name || "Plano de conteúdo"}</strong><p>{brand?.name} · {form.posts_per_week} publicações por semana</p><p>Formatos: {form.formats.map(value=>({post:"Post",carousel:"Carrossel",story:"Story"}[value]||value)).join(", ")}</p><p className="whitespace-pre-wrap">{form.pillars}</p><p>Limite: {form.weekly_image_limit} imagens por semana, incluindo novas tentativas.</p></div>
           <label className="studio-option"><input type="checkbox" checked={form.automatic} onChange={e=>setForm({...form,automatic:e.target.checked})}/> Produzir automaticamente as pautas da semana</label>
@@ -124,8 +125,8 @@ export function SocialMedia({embedded=false}:{embedded?:boolean}) {
         </form>
       </div>}
       <div className="space-y-5">
-        {view==="plans"&&<section className="panel p-5"><h2 className="mb-3 font-semibold">Planos de conteúdo</h2>{!plans.length&&<p className="text-slate-500">Cadastre o primeiro plano para organizar a produção semanal.</p>}{plans.map(plan=><div className="flex flex-wrap items-center justify-between gap-3 border-b py-3" key={plan.id}><button type="button" disabled={busy} className="rounded-xl p-2 text-left hover:bg-slate-100" onClick={()=>{setSelected(Number(plan.id));setView("review");}}><strong>{plan.name}</strong><p className="text-sm text-slate-500">{plan.client_name} · {plan.posts_per_week}/semana · {plan.active?"Ativo":"Pausado"}</p></button><div className="flex gap-2"><button type="button" disabled={busy} className="btn-secondary" onClick={()=>edit(plan)}>Editar</button><button type="button" disabled={busy} className="btn-secondary" onClick={()=>void perform(()=>request(`/social-media/plans/${plan.id}`,{method:"PUT",...json({...plan,active:!plan.active})}))}>{plan.active?"Pausar":"Ativar"}</button></div></div>)}</section>}
-        {view==="review"&&!selected&&<EmptyState><p className="font-semibold">Vamos planejar o primeiro conteúdo?</p><p className="helper">Escolha o cliente, os assuntos e a quantidade de publicações por semana.</p><button type="button" className="btn-primary mt-4" onClick={()=>setView("plans")}>Criar meu primeiro plano</button></EmptyState>}
+        {view==="plans"&&<section className="panel p-5"><div className="mb-3 flex flex-wrap items-center justify-between gap-3"><h2 className="font-semibold">Planos de conteúdo</h2><Link className="btn-primary" to="/criar?purpose=social">Novo planejamento</Link></div>{!plans.length&&<p className="text-slate-500">Cadastre o primeiro plano para organizar a produção semanal.</p>}{plans.map(plan=><div className="flex flex-wrap items-center justify-between gap-3 border-b py-3" key={plan.id}><button type="button" disabled={busy} className="rounded-xl p-2 text-left hover:bg-slate-100" onClick={()=>{setSelected(Number(plan.id));setView("review");}}><strong>{plan.name}</strong><p className="text-sm text-slate-500">{plan.client_name} · {plan.posts_per_week}/semana · {plan.active?"Ativo":"Pausado"}</p></button><div className="flex gap-2"><button type="button" disabled={busy} className="btn-secondary" onClick={()=>edit(plan)}>Editar</button><button type="button" disabled={busy} className="btn-secondary" onClick={()=>void perform(()=>request(`/social-media/plans/${plan.id}`,{method:"PUT",...json({...plan,active:!plan.active})}))}>{plan.active?"Pausar":"Ativar"}</button></div></div>)}</section>}
+        {view==="review"&&!selected&&<EmptyState><p className="font-semibold">Vamos planejar o primeiro conteúdo?</p><p className="helper">Escolha a marca, os assuntos e a quantidade de publicações por semana no estúdio.</p><Link className="btn-primary mt-4" to="/criar?purpose=social">Criar meu primeiro plano</Link></EmptyState>}
         {view==="review"&&selected&&!calendar&&(calendarLoading?<LoadingBlock/>:<EmptyState><p>Não foi possível carregar os conteúdos deste plano.</p><button type="button" className="btn-secondary mt-3" disabled={busy} onClick={()=>void perform(refresh)}>Tentar novamente</button></EmptyState>)}
         {view==="review"&&calendar&&<>
           <details className="panel p-5" open={!calendar.contents.length}><summary className="cursor-pointer text-sm font-semibold">Planejar uma nova semana · {calendar.plan.name}</summary><div className="my-3 flex flex-wrap items-end gap-3"><label className="label">Início da semana (segunda-feira)<input className="field" type="date" value={week} onChange={e=>setWeek(e.target.value)}/></label><button type="button" disabled={busy||!calendar.plan.active} className="btn-primary" onClick={()=>void perform(()=>request(`/social-media/plans/${selected}/batches`,{method:"POST",...json({...(week?{week_start:week}:{}),retry:true})}))}>{busy?"Processando…":"Planejar semana"}</button></div><p className="helper">Deixe a data em branco para usar a semana atual. Vamos pesquisar ideias e organizar as publicações. Se uma tentativa falhar, use este botão para retomar.</p>{!calendar.plan.active&&<p className="mt-3 text-sm text-amber-800">Este plano está pausado. Ative-o em “Configurar planos” para planejar a produção.</p>}{calendar.batches.map(batch=><div key={batch.id} className="mt-3 rounded-xl bg-slate-50 p-3 text-sm"><span className="font-medium">Semana de {batch.week_start.slice(0,10).split("-").reverse().join("/")}</span><span className="status-badge ml-2">{labels[batch.status]||batch.status}</span><p className="mt-2 text-slate-600">{batch.research_note}</p><p className="mt-1 text-xs text-slate-500">{batch.image_calls} imagens solicitadas</p></div>)}</details>

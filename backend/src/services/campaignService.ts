@@ -27,6 +27,7 @@ import { generateImage } from "./openaiService.js";
 import { persistMediaPath } from "./mediaStorageService.js";
 import { resolveVisuals, validateVisualReferences, visualSelectionSchema } from "./visualLibraryService.js";
 import { getActiveProfileDiagnostic, type ProfileDiagnosticRecord } from "./profileDiagnosticService.js";
+import { creationBrandRules, resolveCreationStyle } from "./creationDirectionService.js";
 
 export async function createCampaign(
   input: NewCampaignInput,
@@ -39,9 +40,11 @@ export async function createCampaign(
 
   const assets = await listClientAssets(input.client_id);
   const selection = visualSelectionSchema.parse(input.visual_selection ?? {});
+  const style = await resolveCreationStyle(input.client_id, selection.style_asset_id);
   const references = await resolveVisuals(input.client_id, selection, "ads");
   const normalized = await normalizeBriefing(input, client as ClientProfile, assets);
   normalized.observations += `\nMateriais obrigatórios: ${references.map(r => `${r.kind}: ${r.name}; preservar ${r.preservation_notes}`).join("; ")}. ${selection.no_people ? "Não incluir pessoas." : ""}`;
+  normalized.observations += `\n${creationBrandRules({ ...client, color_palette: normalized.color_palette || client.color_palette })}`;
   const campaignId = await createPendingCampaign(input, normalized, referenceFilePath);
   await run("UPDATE campaigns SET visual_selection=?::jsonb WHERE id=?", [JSON.stringify({ ...selection, references }), campaignId]);
   let pipelineRunId: number | null = null;
@@ -112,7 +115,7 @@ export async function createCampaign(
     await validateVisualReferences(input.client_id,references,"ads");
     const image = await runCampaignPipelineStep(pipelineRunId, "image_generation", () =>
       generateImage(
-        buildImageGenerationPrompt(creativeOutput, normalized),
+        `${buildImageGenerationPrompt(creativeOutput, normalized)}\n${creationBrandRules({ ...client, color_palette: normalized.color_palette || client.color_palette })}`,
         input.formato,
         {
           clientId: input.client_id,
@@ -121,7 +124,7 @@ export async function createCampaign(
           queueId: options?.queueId ?? null,
           operationType: options?.reprocess ? "reprocessamento" : "geracao_imagem"
         },
-        { references, mode: selection.mode, no_people: selection.no_people }
+        { references, mode: selection.mode, no_people: selection.no_people, style_filename: style?.filename, style_kind: "uploads" }
       )
     );
     const brandOverlay = await runCampaignPipelineStep(pipelineRunId, "brand_overlay", () =>

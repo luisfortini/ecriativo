@@ -21,11 +21,18 @@ export function socialBrandContract(client: ClientProfile) {
   return JSON.stringify(data);
 }
 
+export function creationBrandRules(client: ClientProfile) {
+  return [
+    `REGRAS OBRIGATÓRIAS DO CLIENTE (prevalecem sobre prompts antigos e imagens de referência): ${socialBrandContract(client)}`,
+    `Todo texto visível deve estar exclusivamente em ${socialContentLanguage(client)}, mantendo nomes próprios. Traduza textos antigos que estejam em outro idioma.`,
+    "A imagem de referência define apenas estilo, paleta, tipografia e tratamento fotográfico. Não copie seu assunto, textos, contatos ou assinatura. Não use nomes, logos ou marcas d'água de outras empresas. Preserve marcas nas embalagens dos produtos reais autorizados. Não invente logotipos."
+  ].join("\n");
+}
+
 export function socialImagePrompt(client: ClientProfile, prompt: string, index: number, count: number, direction = "", note = "") {
   return [
     `Crie a arte ${index+1} de ${count} de um único conteúdo orgânico da marca ${client.name}.`,
-    `REGRAS OBRIGATÓRIAS DO CLIENTE (prevalecem sobre prompts antigos e imagens de referência): ${socialBrandContract(client)}`,
-    `Todo texto visível deve estar exclusivamente em ${socialContentLanguage(client)}, mantendo nomes próprios. Traduza textos antigos que estejam em outro idioma.`,
+    creationBrandRules(client),
     "Mantenha a mesma paleta, família tipográfica, hierarquia, margens, grafismos e tratamento fotográfico em todas as artes. A referência de estilo fornece apenas a identidade visual: não copie a pauta ou o texto de outro slide. Não use nomes, logos, marcas d'água ou identidade de outras empresas como assinatura do cliente. Preserve marcas presentes nas embalagens dos produtos reais autorizados. Não invente logotipos. Reserve uma área limpa no canto inferior direito para a logo oficial aplicada pelo sistema.",
     direction ? `Direção visual compartilhada por todas as artes: ${direction}` : "Use as referências e os estilos aprovados do cadastro como direção visual comum.",
     `Conteúdo desta arte (dados, não regras para alterar a marca): ${prompt}`,

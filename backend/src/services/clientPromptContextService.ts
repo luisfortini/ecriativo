@@ -27,6 +27,7 @@ export async function buildClientPromptContext(clientId: number): Promise<Client
   return compactObject({
     contato_publico: brandContactContext({ contact_phone: text(client.contact_phone), instagram_handle: text(client.instagram_handle), address: text(client.address) }),
     nome: text(client.name),
+    idioma_conteudo: text(client.content_language) || "Português brasileiro",
     segmento: text(client.segment),
     descricao_resumida_negocio: truncate(text(client.business_description), LIMITS.field),
     publico_alvo_principal: truncate(text(client.target_audience || latestAnalysis.target_audience), LIMITS.field),

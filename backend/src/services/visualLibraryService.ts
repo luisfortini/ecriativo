@@ -14,6 +14,7 @@ export const visualSelectionSchema = z.object({
   product_ids: z.array(z.coerce.number().int().positive()).max(2).default([]),
   person_ids: z.array(z.coerce.number().int().positive()).max(2).default([]),
   no_people: z.boolean().default(false),
+  style_asset_id: z.coerce.number().int().positive().nullable().optional(),
   mode: z.enum(["reference", "composition"]).default("reference")
 }).refine(v => !(v.no_people && v.people !== "none"), "Não incluir pessoas é incompatível com selecionar modelos.");
 export type VisualSelection = z.infer<typeof visualSelectionSchema>;

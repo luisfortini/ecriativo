@@ -160,6 +160,7 @@ export interface NormalizedBriefing {
 }
 
 export interface ClientPromptContext {
+  idioma_conteudo?: string;
   contato_publico?: ReturnType<typeof import("./services/brandContact.js").brandContactContext>;
   nome: string;
   segmento: string;

@@ -1,6 +1,5 @@
 import { z } from "zod";
 import path from "node:path";
-import sharp from "sharp";
 import { all, get, run, transaction, runWithOrganizationContext } from "../db/connection.js";
 import { AppError } from "../utils/errors.js";
 import type { ClientProfile } from "../types.js";
@@ -8,7 +7,8 @@ import { addDays, anniversaryInWeek, localDate, weekStart } from "./editorialCal
 import { researchEditorial, writeSocialContent, reviewSocialImage, type EditorialEvidence } from "./editorialAiService.js";
 import { requireClient, resolveVisuals, validateVisualReferences, visualSelectionSchema, type VisualSelection, type VisualReference } from "./visualLibraryService.js";
 import { generateImage } from "./openaiService.js";
-import { mediaFilename, readMedia } from "./mediaStorageService.js";
+import { mediaFilename } from "./mediaStorageService.js";
+import { resolveCreationStyle } from "./creationDirectionService.js";
 import { requestEditorialCorrections, type CorrectionRequest } from "./editorialCorrectionService.js";
 import { socialImagePrompt } from "./socialBrandContract.js";
 import { assertContentNotScheduled } from "./socialPublishingService.js";
@@ -30,6 +30,7 @@ export async function saveEditorialPlan(raw: unknown, id?: number) {
   if (!parsed.success) throw new AppError(parsed.error.issues[0].message, 422);
   const value = parsed.data;
   await requireClient(value.client_id);
+  if (value.visual_selection.style_asset_id != null) await resolveCreationStyle(value.client_id, value.visual_selection.style_asset_id);
   if (value.active) await resolveVisuals(value.client_id, value.visual_selection, "social");
   const params = { ...value, pillars: JSON.stringify(value.pillars), formats: JSON.stringify(value.formats), visual_selection: JSON.stringify(value.visual_selection) };
   if (id) {
@@ -168,12 +169,7 @@ async function processEditorialOrganization(engine:EditorialEngine) {
     }
     const brandAssets = await all<{type:string;file_url:string}>("SELECT type,file_url FROM client_assets WHERE client_id=? AND type IN ('logo_main','approved_reference','approved_ad') ORDER BY id DESC",[item.client_id]);
     const logo=brandAssets.find(asset=>asset.type==="logo_main");
-    let approvedStyle:typeof brandAssets[number]|undefined;
-    for(const asset of brandAssets.filter(asset=>asset.type!=="logo_main")) {
-      const stored=await readMedia("uploads",mediaFilename(asset.file_url));
-      const metadata=await sharp(stored.data).metadata().catch(()=>undefined);
-      if(metadata?.format && ["png","jpeg","webp"].includes(metadata.format)){approvedStyle=asset;break;}
-    }
+    const approvedStyle = await resolveCreationStyle(Number(item.client_id), plan.visual_selection.style_asset_id);
     const indexes=item.correction_request ? item.correction_request.indexes.filter(i=>!item.correction_request!.completed.includes(i)) : item.image_prompts.map((_,i)=>i).filter(i=>!item.images[i]?.url || Boolean(item.images[i]?.quality_issues?.length));
     for (const i of indexes) {
       const current = await get<{active:boolean;weekly_image_limit:number}>("SELECT active,weekly_image_limit FROM editorial_plans WHERE id=?",[plan.id]);

@@ -74,12 +74,12 @@ async function run() {
     await page.getByRole("button",{name:/4.*Tudo pronto/}).click();
     await page.getByRole("heading",{name:"Café da Serra",exact:true}).waitFor();
     await page.getByRole("link",{name:"Começar a criar"}).click();
-    await page.getByRole("link",{name:/Conteúdo para redes sociais/}).click();
-    await page.getByLabel("Nome do plano").fill("Semana de teste");
+    await page.getByRole("button",{name:/Planejamento para redes sociais/}).click();
+    await page.getByLabel("Nome do planejamento").fill("Semana de teste");
     await page.getByRole("button",{name:"Continuar",exact:true}).click();
-    await page.getByRole("heading",{name:"Como os conteúdos devem aparecer?"}).waitFor();
+    await page.getByRole("heading",{name:"Como suas artes devem aparecer?"}).waitFor();
     await page.getByRole("button",{name:"Continuar",exact:true}).click();
-    await page.getByRole("button",{name:"Salvar plano de conteúdo"}).click();
+    await page.getByRole("button",{name:"Salvar planejamento"}).click();
     await page.getByRole("heading",{name:"Sua pausa merece um café"}).waitFor();
     assert.equal(savedPlan.client_id,10);
     await page.getByRole("link",{name:"Revisar",exact:true}).click();
