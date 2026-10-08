@@ -14,6 +14,8 @@
     "test:tenant": "tsx --test src/tests/organizationRole.test.ts src/tests/editorialCalendar.test.ts",
     "test:studio": "tsx --test src/tests/brandContact.test.ts",
     "test:creation": "tsx --test src/tests/creationDirection.test.ts",
+    "test:art-versions": "tsx --test src/tests/artVersion.test.ts",
+    "smoke:art-versions": "tsx src/scripts/smokeArtVersions.ts",
     "smoke:creation": "tsx src/scripts/smokeCreation.ts",
     "test:campaign-corrections": "tsx --test src/tests/campaignCorrection.test.ts",
     "smoke:campaign-corrections": "tsx src/scripts/smokeCampaignCorrections.ts",

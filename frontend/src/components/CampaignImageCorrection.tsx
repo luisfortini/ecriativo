@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { CheckCircle2, Clock3, History, LoaderCircle, WandSparkles } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
-import { correctCampaignImage, getCampaign } from "../services/api";
+import { correctCampaignImage, getCampaign, restoreCampaignImage } from "../services/api";
 import type { CampaignDetail, CampaignImageCorrection as Correction } from "../types";
 import { SafeImage } from "./SafeImage";
 
@@ -15,10 +15,23 @@ export function CampaignImageCorrection({ campaign, onUpdated }: { campaign: Cam
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [pollError, setPollError] = useState("");
+  const [restore,setRestore]=useState<{id:number;version:"before"|"after";url:string}|null>(null);
+  const [restoreError,setRestoreError]=useState("");
+  const [restored,setRestored]=useState(false);
   const textarea = useRef<HTMLTextAreaElement>(null);
+  const restoreArea=useRef<HTMLDivElement>(null);
+  useEffect(()=>{if(restore)restoreArea.current?.scrollIntoView({block:"center"});},[restore]);
   const history = campaign.image_corrections || [];
   const active = history.find(item => item.status === "queued" || item.status === "processing");
-  const latest = history[0];
+  const latest = restored ? undefined : history[0];
+
+  async function confirmRestore() {
+    if(!restore||active||submitting||!campaign.image_url)return;
+    setSubmitting(true);setRestoreError("");
+    try {onUpdated(await restoreCampaignImage(campaign.id,restore.id,restore.version,campaign.image_url));setRestore(null);setRestored(true);setEditing(false);}
+    catch(reason){setRestoreError(reason instanceof Error?reason.message:"Não foi possível restaurar. A arte atual foi mantida.");}
+    finally{setSubmitting(false);}
+  }
 
   useEffect(() => {
     if (!active) { setPollError(""); return; }
@@ -42,6 +55,7 @@ export function CampaignImageCorrection({ campaign, onUpdated }: { campaign: Cam
     try {
       const response = await correctCampaignImage(campaign.id, note.trim(), campaign.image_url);
       onUpdated({ ...campaign, image_corrections: [response.correction, ...history] });
+      setRestored(false);setRestore(null);
       setNote(""); setEditing(false);
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Não foi possível solicitar a correção. Tente novamente."); }
     finally { setSubmitting(false); }
@@ -50,6 +64,14 @@ export function CampaignImageCorrection({ campaign, onUpdated }: { campaign: Cam
   return <section className="panel p-4" aria-labelledby="ad-correction-title">
     <h2 id="ad-correction-title" className="font-bold text-ink flex items-center gap-2"><WandSparkles size={19} aria-hidden="true" /> Quer ajustar esta arte?</h2>
     <p className="helper mb-4">Diga o que precisa mudar na imagem. A legenda é mantida e as versões anteriores ficam no histórico.</p>
+    {restored&&<p className="studio-success mb-3" role="status">Versão restaurada, sem custo de IA. A arte substituída continua no histórico. Confira e aprove novamente.</p>}
+    {restore&&<div ref={restoreArea} className="studio-summary mb-4 space-y-3" aria-label="Confirmar troca de versão">
+      <strong>Usar esta versão da arte?</strong>
+      <SafeImage src={restore.url} alt="Versão escolhida para restaurar" className="h-40 w-full object-contain"/>
+      <p className="helper">A legenda será mantida. A arte atual ficará no histórico e será necessária uma nova aprovação. Nada será enviado ou publicado.</p>
+      {restoreError&&<p role="alert" className="studio-inline-error">{restoreError}</p>}
+      <div className="flex flex-wrap gap-2"><button autoFocus type="button" disabled={submitting||Boolean(active)} className="btn-primary" onClick={()=>void confirmRestore()}>{submitting?"Restaurando…":"Confirmar uso desta versão"}</button><button type="button" disabled={submitting} className="btn-secondary" onClick={()=>{setRestore(null);setRestoreError("");}}>Cancelar troca</button></div>
+    </div>}
     {active ? <div className="ad-correction-progress" role="status">{active.status === "processing" ? <LoaderCircle size={20} className="animate-spin" aria-hidden="true" /> : <Clock3 size={20} aria-hidden="true" />}<div><strong>{statusLabels[active.status]}</strong><p>Pode levar alguns minutos. A correção continua mesmo se você sair desta página. A imagem atual permanece até a nova ficar pronta.</p></div></div> : latest?.status === "completed" ? <p className="studio-success mb-4 flex items-start gap-2" role="status"><CheckCircle2 size={19} className="shrink-0" aria-hidden="true" />{campaign.creative_status === "approved" ? "Última correção concluída. Esta versão já foi aprovada." : "Nova versão pronta. Confira a imagem e aprove novamente antes de usar."}</p> : latest?.status === "failed" ? <div role="alert" className="studio-inline-error mb-4"><strong>A correção não foi concluída. A arte anterior foi mantida.</strong><p className="mt-1">{latest.error_message}</p></div> : null}
     {pollError && <p role="alert" className="studio-inline-error mt-3">{pollError}</p>}
     {canManage && !active && (!editing ? <button className="btn-secondary w-full" type="button" onClick={() => { setEditing(true); setError(""); }}><WandSparkles size={17} aria-hidden="true" /> Corrigir arte</button> : <form onSubmit={submit} noValidate className="space-y-3">
@@ -60,13 +82,13 @@ export function CampaignImageCorrection({ campaign, onUpdated }: { campaign: Cam
       <div className="flex flex-wrap gap-2"><button type="submit" className="btn-primary" disabled={submitting}>{submitting ? <LoaderCircle size={16} className="animate-spin" aria-hidden="true" /> : <WandSparkles size={16} aria-hidden="true" />}{submitting ? "Solicitando…" : "Gerar versão corrigida"}</button><button type="button" className="btn-secondary" disabled={submitting} onClick={() => { setEditing(false); setError(""); }}>Cancelar</button></div>
     </form>)}
     {!canManage && <p className="text-xs text-slate-500">Peça a um administrador da conta para solicitar uma correção.</p>}
-    {history.length > 0 && <details className="mt-5 border-t border-slate-200 pt-3"><summary className="flex items-center gap-2 cursor-pointer text-sm font-semibold"><History size={16} aria-hidden="true" /> Histórico de correções ({history.length})</summary><div className="mt-3 space-y-4">{history.map(item => <CorrectionHistory key={item.id} item={item} canRetry={canManage && !active && !submitting} onRetry={() => { setEditing(true); setNote(item.note); setError(""); setTimeout(() => textarea.current?.focus(), 0); }} />)}</div></details>}
+    {history.length > 0 && <details className="mt-5 border-t border-slate-200 pt-3"><summary className="flex items-center gap-2 cursor-pointer text-sm font-semibold"><History size={16} aria-hidden="true" /> Histórico de correções ({history.length})</summary><div className="mt-3 space-y-4">{history.map(item => <CorrectionHistory key={item.id} item={item} currentUrl={campaign.image_url} canRetry={canManage && !active && !submitting} onRestore={(version,url)=>{setRestore({id:item.id,version,url});setRestoreError("");setRestored(false);}} onRetry={() => { setEditing(true); setNote(item.note); setError(""); setTimeout(() => textarea.current?.focus(), 0); }} />)}</div></details>}
   </section>;
 }
 
-function CorrectionHistory({ item, canRetry, onRetry }: { item: Correction; canRetry: boolean; onRetry: () => void }) {
+function CorrectionHistory({ item, canRetry, onRetry,currentUrl,onRestore }: { item: Correction; canRetry: boolean; onRetry: () => void;currentUrl:string|null;onRestore:(version:"before"|"after",url:string)=>void }) {
   return <article className="ad-correction-history"><header><strong>{statusLabels[item.status]}</strong><time>{new Date(item.created_at).toLocaleString("pt-BR")}</time></header><p className="mt-2 whitespace-pre-wrap break-words text-xs text-slate-700">{item.note}</p>{item.requester_name && <p className="mt-1 text-xs text-slate-500">Solicitada por {item.requester_name}</p>}
-    {item.status === "completed" && item.image_url && <div className="ad-correction-comparison"><figure><figcaption>Antes</figcaption><SafeImage src={item.before_image_url} alt="Arte antes desta correção" className="ad-correction-history-image" /></figure><figure><figcaption>Depois</figcaption><SafeImage src={item.image_url} alt="Arte corrigida nesta versão" className="ad-correction-history-image" /></figure></div>}
+    {item.status === "completed" && item.image_url && <div className="ad-correction-comparison">{(["before","after"] as const).map(version=>{const url=version==="before"?item.before_image_url:item.image_url!;return <figure key={version}><figcaption>{version==="before"?"Antes":"Depois"}</figcaption><SafeImage src={url} alt={version==="before"?"Arte antes desta correção":"Arte corrigida nesta versão"} className="ad-correction-history-image"/>{url===currentUrl?<p className="mt-2 text-xs font-semibold">Versão em uso</p>:<button type="button" disabled={!canRetry} className="btn-secondary mt-2 w-full text-xs" onClick={()=>onRestore(version,url)}>Usar esta versão</button>}</figure>;})}</div>}
     {item.status === "failed" && <><p className="studio-inline-error mt-2" role="alert">{item.error_message || "A arte anterior foi mantida."}</p>{canRetry && <button type="button" className="btn-secondary mt-2 text-xs" onClick={onRetry}>Usar este pedido novamente</button>}</>}
   </article>;
 }

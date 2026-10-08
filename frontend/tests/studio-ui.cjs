@@ -20,7 +20,9 @@ async function run() {
     const profiles=[{id:10,name:"Café da Serra",segment:"Cafeteria",business_description:"Café de qualidade para a sua pausa",color_palette:"Azul escuro e branco",content_language:"Português brasileiro",city:"Campinas",time_zone:"America/Sao_Paulo",brand_voice:"Acolhedor",contact_phone:"+55 19 99999-9999",instagram_handle:"cafedaserra",address:"Rua das Flores, 10",anniversary_date:"10-08",assets:[],brand_analyses:[],profile_diagnostics:[],campaigns:[]},{id:20,name:"Ateliê Aurora",segment:"Moda",business_description:"Moda autoral",color_palette:"Azul escuro e branco",content_language:"English (US)",city:"São Paulo",time_zone:"America/Sao_Paulo",brand_voice:"Elegante",assets:[],brand_analyses:[],profile_diagnostics:[],campaigns:[]}];
     const svg='<svg xmlns="http://www.w3.org/2000/svg" width="540" height="675"><rect width="540" height="675" fill="#070021"/><text x="55" y="180" fill="white" font-size="36">Uma pausa</text><text x="55" y="230" fill="white" font-size="36">que inspira.</text><circle cx="265" cy="440" r="120" fill="#dde2ee"/><text x="55" y="630" fill="white" font-size="20">Café da Serra</text></svg>';
     const image="data:image/svg+xml;base64,"+Buffer.from(svg).toString("base64");
-    const contents=[{id:100,batch_id:5,scheduled_date:"2026-10-08",format:"carousel",topic:"Sua pausa merece um café",caption:"Uma pausa para começar o dia. @cafedaserra",alt_text:"Café da Serra",status:"review",error_message:null,images:[{url:image},{url:image},{url:image}],sources:[],revisions:[]}];
+    const oldImage="https://fixture.invalid/generated/previous.png";
+    const contents=[{id:100,batch_id:5,scheduled_date:"2026-10-08",format:"carousel",topic:"Sua pausa merece um café",caption:"Uma pausa para começar o dia. @cafedaserra",alt_text:"Café da Serra",status:"review",error_message:null,images:[{url:image},{url:image},{url:image}],sources:[],revisions:[{at:"2026-10-07T15:00:00Z",caption:"Legenda da versão anterior",images:[{url:oldImage},{url:oldImage},{url:oldImage}]}]}];
+    let failRestore=true,restoreRequest;
     const plans=[{id:1,client_id:10,client_name:"Café da Serra",name:"Semana acolhedora",active:true,automatic:false,posts_per_week:3,pillars:["Bastidores"],formats:["carousel"],weekly_image_limit:10,visual_selection:{}},{id:2,client_id:20,client_name:"Ateliê Aurora",name:"Coleção Aurora",active:true,automatic:false,posts_per_week:3,pillars:["Moda"],formats:["post"],weekly_image_limit:10,visual_selection:{}}];
     let savedProfile=null, correction=null, savedPlan=null, schedule=null;
     await page.addInitScript(()=>localStorage.setItem("ecriativo.auth.token","fixture-only"));
@@ -43,6 +45,7 @@ async function run() {
       else if(/\/calendar$/.test(p)){const plan=plans.find(v=>v.id===Number(p.split("/")[3]));data={plan,batches:[],contents:plan.client_id===10?contents:[]};}
       else if(/\/publishing$/.test(p))data={enabled:false,configured:false,time_zone:"America/Sao_Paulo",accounts:[{id:7,platform:"instagram",name:"cafedaserra",active:true}],publications:[]};
       else if(/\/corrections$/.test(p)){correction=req.postDataJSON();data={queued:1,images:correction.targets[0].image_indexes.length};}
+      else if(/\/restore-version$/.test(p)){restoreRequest=req.postDataJSON();if(failRestore){status=409;data={message:"Cancele o agendamento antes de restaurar."};failRestore=false;}else{const item=contents[0],version=item.revisions[restoreRequest.version_index];item.revisions.push({at:"2026-10-07T16:00:00Z",caption:item.caption,images:item.images});item.caption=version.caption;item.images=version.images;item.status="review";data={ok:true};}}
       else if(/\/approve$/.test(p)){contents[0].status="approved";data={};}
       else if(/\/schedule$/.test(p)){schedule=req.postDataJSON();data={};}
       else if(p==="/organization/members")data=[{...user,role:"owner",status:"active",created_at:"2026-10-01"}];
@@ -92,6 +95,14 @@ async function run() {
     await page.getByRole("button",{name:"Refazer artes selecionadas"}).click();
     await page.getByRole("button",{name:"Aprovar conteúdo"}).waitFor();
     assert.deepEqual(correction.targets[0].image_indexes,[2]);
+    await page.getByText("Versões anteriores (1)",{exact:true}).click();
+    await page.getByRole("button",{name:"Usar versão 1",exact:true}).click();
+    await page.getByRole("button",{name:"Restaurar versão selecionada"}).click();
+    await page.locator(".studio-inline-error").filter({hasText:"Cancele o agendamento"}).first().waitFor();
+    assert.equal(contents[0].caption,"Uma pausa para começar o dia. @cafedaserra");
+    await page.getByRole("button",{name:"Restaurar versão selecionada"}).click();
+    await page.getByLabel("Legenda do conteúdo",{exact:true}).getByText("Legenda da versão anterior",{exact:true}).waitFor();
+    assert.equal(restoreRequest.revision_count,1);assert.equal(contents[0].revisions.length,2);assert.equal(contents[0].status,"review");
     await page.getByRole("button",{name:"Aprovar conteúdo"}).click();
     await page.getByRole("link",{name:"Agendar publicação"}).waitFor();
     await page.screenshot({path:path.join(out,"review-desktop.png"),fullPage:true});

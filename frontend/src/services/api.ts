@@ -139,6 +139,10 @@ export function correctCampaignImage(id: number, note: string, baseImageUrl: str
   });
 }
 
+export function restoreCampaignImage(id:number,correctionId:number,version:"before"|"after",baseImageUrl:string) {
+  return request<CampaignDetail>(`/campaigns/${id}/restore-image-version`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({correction_id:correctionId,version,base_image_url:baseImageUrl})});
+}
+
 export function getClients() {
   return request<ClientSummary[]>("/clients");
 }

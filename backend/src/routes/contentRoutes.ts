@@ -6,6 +6,7 @@ import { AppError } from "../utils/errors.js";
 import { requireOrganizationRole } from "../middleware/organizationRoleMiddleware.js";
 import { addPhoto, listSubjects, saveSubject, setPrimaryPhoto } from "../services/visualLibraryService.js";
 import { z } from "zod";
+import { restoreSocialVersion } from "../services/artVersionService.js";
 import { requestEditorialCorrections } from "../services/editorialCorrectionService.js";
 import { contentAction, createEditorialBatch, editEditorialContent, getEditorialCalendar, listEditorialPlans, saveEditorialPlan } from "../services/editorialService.js";
 import { sendSocialContentWhatsapp } from "../services/whatsappNotificationService.js";
@@ -28,6 +29,11 @@ contentRoutes.post("/social-media/plans/:id/batches",asyncHandler(async (req,res
 }));
 contentRoutes.post("/social-media/contents/:id/send-whatsapp",asyncHandler(async (req,res) => {
   res.json(await sendSocialContentWhatsapp(Number(req.params.id)));
+}));
+contentRoutes.post("/social-media/contents/:id/restore-version",asyncHandler(async(req,res)=>{
+  const id=z.coerce.number().int().positive().safeParse(req.params.id);
+  if(!id.success)throw new AppError("Conteúdo inválido.",422);
+  res.json(await restoreSocialVersion(id.data,req.body,req.user?.id??null));
 }));
 contentRoutes.post("/social-media/contents/:id/:action",asyncHandler(async (req,res) => {
   await contentAction(Number(req.params.id),String(req.params.action),String(req.body.note ?? ""));res.json({ok:true});

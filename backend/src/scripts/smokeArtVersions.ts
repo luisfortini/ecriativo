@@ -1,0 +1,72 @@
+import assert from "node:assert/strict";
+import {Pool} from "pg";
+import dotenv from "dotenv";
+dotenv.config({path:process.env.VERSION_TEST_ENV||"backend/.env"});
+async function main(){
+  const staging=process.env.STAGING_DATABASE_URL||(process.env.VERSION_TEST_ENV?process.env.DATABASE_URL:undefined);
+  if(!staging)throw new Error("Indique o banco de testes com STAGING_DATABASE_URL ou VERSION_TEST_ENV.");
+  const schema="smoke_art_versions_"+Date.now(),admin=new Pool({connectionString:staging,max:1});
+  let pool:Pool|undefined,created=false;
+  try{
+    await admin.query(`CREATE SCHEMA "${schema}"`);created=true;
+    const url=new URL(staging);url.searchParams.set("options","-c search_path="+schema);
+    process.env.DATABASE_URL=url.toString();process.env.OPENAI_API_KEY="";
+    process.env.ADMIN_NAME="";process.env.ADMIN_EMAIL="";process.env.ADMIN_PASSWORD="";process.env.JWT_SECRET="isolated-art-versions-secret-at-least-32";
+    const db=await import("../db/connection.js");pool=db.pool;
+    const {migrate}=await import("../db/migrate.js");await migrate();await db.validateTenantRole();
+    const {createOrganization}=await import("../services/organizationService.js"),{createClient}=await import("../services/clientService.js");
+    const {persistMedia}=await import("../services/mediaStorageService.js"),{restoreAdVersion,restoreSocialVersion}=await import("../services/artVersionService.js");
+    const {saveEditorialPlan}=await import("../services/editorialService.js");
+    const user=Number((await db.run("INSERT INTO users(name,email,password_hash,role,active) VALUES('Teste','versions@test.invalid','fixture','user',TRUE)")).lastInsertRowid);
+    const a=await createOrganization(user,"Versões A","agency"),b=await createOrganization(user,"Versões B","agency");
+    const png=Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jH0kAAAAASUVORK5CYII=","base64");
+    const image=(name:string)=>"https://fixture.invalid/generated/"+name+".png";
+    let ad=0,correction=0,social=0;
+    await db.runWithOrganizationContext(a.id,async()=>{
+      const client=Number((await createClient({name:"Marca A"}))!.id);
+      for(const name of ["old","old-final","new","new-final"])await persistMedia("generated",name+".png",png);
+      ad=Number((await db.run("INSERT INTO campaigns(client_id,formato,status,creative_status,image_url,final_image_url,creative_json,strategy_json) VALUES(?,'4:5','completed','approved',?,?,'{}','{}')",[client,image("new"),image("new-final")])).lastInsertRowid);
+      correction=Number((await db.run("INSERT INTO campaign_image_corrections(campaign_id,client_id,note,status,before_image_url,before_generated_image_url,image_url,generated_image_url) VALUES(?,?,'Correção teste','completed',?,?,?,?)",[ad,client,image("old-final"),image("old"),image("new-final"),image("new")])).lastInsertRowid);
+      const back={correction_id:correction,version:"before",base_image_url:image("new-final")};
+      const simultaneous=await Promise.allSettled([restoreAdVersion(ad,back,user),restoreAdVersion(ad,back,user)]);
+      assert.equal(simultaneous.filter(result=>result.status==="fulfilled").length,1);
+      const current=()=>db.get<{image_url:string;final_image_url:string;creative_status:string}>("SELECT * FROM campaigns WHERE id=?",[ad]);
+      assert.equal((await current())!.final_image_url,image("old-final"));assert.equal((await current())!.image_url,image("old"));assert.equal((await current())!.creative_status,"waiting_review");
+      assert.equal((await db.all("SELECT * FROM campaign_image_corrections WHERE campaign_id=?",[ad])).length,2);
+      await assert.rejects(()=>restoreAdVersion(ad,back,user),/atualizada/);
+      await restoreAdVersion(ad,{...back,version:"after",base_image_url:image("old-final")},user);
+      assert.equal((await current())!.final_image_url,image("new-final"));
+      const missing=Number((await db.run("INSERT INTO campaign_image_corrections(campaign_id,client_id,note,status,before_image_url,image_url) VALUES(?,?,'Arquivo ausente','completed',?,?)",[ad,client,image(schema),image("new-final")])).lastInsertRowid);
+      await assert.rejects(()=>restoreAdVersion(ad,{...back,correction_id:missing},user),/indisponível/);
+      const queued=(await db.run("INSERT INTO campaign_image_corrections(campaign_id,client_id,note,before_image_url) VALUES(?,?,'Na fila teste',?)",[ad,client,image("new-final")])).lastInsertRowid;
+      await assert.rejects(()=>restoreAdVersion(ad,back,user),/correção terminar/);
+      await db.run("UPDATE campaign_image_corrections SET status='failed' WHERE id=?",[queued]);
+      const plan=await saveEditorialPlan({client_id:client,name:"Plano pausado",posts_per_week:1,pillars:["Dicas"],formats:["carousel"],weekly_image_limit:3});
+      const batch=Number((await db.run("INSERT INTO editorial_batches(client_id,plan_id,week_start) VALUES(?,?,'2026-10-05')",[client,plan.id])).lastInsertRowid);
+      const old=Array.from({length:3},()=>({url:image("old"),quality_issues:["Revisar identidade"]})),fresh=Array.from({length:3},()=>({url:image("new")}));
+      const revision={images:old,caption:"Legenda antiga",alt_text:"Descrição antiga",image_prompts:["Texto antigo"],visual_direction:"Estilo antigo",at:new Date().toISOString()};
+      social=Number((await db.run("INSERT INTO social_contents(client_id,batch_id,position,scheduled_date,format,topic,caption,images,revisions,status) VALUES(?,?,1,'2026-10-07','carousel','Conteúdo teste','Legenda nova',?::jsonb,?::jsonb,'approved')",[client,batch,JSON.stringify(fresh),JSON.stringify([revision])])).lastInsertRowid);
+      const read=()=>db.get<{images:typeof old;caption:string;status:string;revisions:Array<typeof revision>;correction_request:unknown}>("SELECT * FROM social_contents WHERE id=?",[social]);
+      const socialBack={version_index:0,revision_count:1,base_image_urls:fresh.map(item=>item.url)};
+      await restoreSocialVersion(social,socialBack,user);
+      const restored=(await read())!;assert.equal(restored.status,"review");assert.equal(restored.caption,"Legenda antiga");assert.deepEqual(restored.images,old);assert.equal(restored.revisions.length,2);assert.equal(restored.revisions[1].caption,"Legenda nova");assert.equal(restored.correction_request,null);
+      await assert.rejects(()=>restoreSocialVersion(social,socialBack,user),/atualizado/);
+      await restoreSocialVersion(social,{version_index:1,revision_count:2,base_image_urls:old.map(item=>item.url)},user);
+      assert.equal((await read())!.caption,"Legenda nova");
+      const account=Number((await db.run("INSERT INTO social_accounts(client_id,platform,account_id,name,token_encrypted) VALUES(?,'instagram','fixture','Teste','fixture')",[client])).lastInsertRowid);
+      const publication=Number((await db.run("INSERT INTO social_publications(client_id,content_id,account_id,scheduled_at,time_zone,snapshot) VALUES(?,?,?,CURRENT_TIMESTAMP+INTERVAL '1 day','America/Sao_Paulo','{}')",[client,social,account])).lastInsertRowid);
+      const next={version_index:0,revision_count:3,base_image_urls:fresh.map(item=>item.url)};
+      await assert.rejects(()=>restoreSocialVersion(social,next,user),/agendamentos/);
+      await db.run("UPDATE social_publications SET status='cancelled' WHERE id=?",[publication]);
+      await db.run("UPDATE social_contents SET status='processing' WHERE id=?",[social]);
+      await assert.rejects(()=>restoreSocialVersion(social,next,user),/produção terminar/);
+      assert.equal((await db.all("SELECT * FROM ai_usage_logs")).length,0);
+    });
+    await db.runWithOrganizationContext(b.id,async()=>{
+      await assert.rejects(()=>restoreAdVersion(ad,{correction_id:correction,version:"before",base_image_url:image("new-final")},user),/não encontrado/);
+      await assert.rejects(()=>restoreSocialVersion(social,{version_index:0,revision_count:1,base_image_urls:[]},user),/não encontrado/);
+    });
+    console.log("PASS: ad undo/redo, immutable ledger, concurrent/stale/queued/missing-file guards, social art+caption restoration, quality issues retained, reapproval, schedule/processing guard and tenant isolation. No AI calls.");
+  }finally{await pool?.end();if(created&&/^smoke_art_versions_\d+$/.test(schema))await admin.query(`DROP SCHEMA "${schema}" CASCADE`);await admin.end();}
+}
+main().catch(error=>{console.error(error instanceof Error?error.message:"Version test failed");process.exitCode=1;});

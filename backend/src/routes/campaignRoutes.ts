@@ -68,6 +68,10 @@ import {
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { addOrganizationMemberController, listOrganizationMembersController, updateAccountTypeController } from "../controllers/organizationController.js";
 import { requireOrganizationRole } from "../middleware/organizationRoleMiddleware.js";
+import { restoreAdVersion } from "../services/artVersionService.js";
+import { getCampaign } from "../services/campaignService.js";
+import { z } from "zod";
+import { AppError } from "../utils/errors.js";
 
 const uploadDir = config.uploadFilesDir;
 fs.mkdirSync(uploadDir, { recursive: true });
@@ -91,6 +95,12 @@ campaignRoutes.get("/campaigns/:id/navigation", asyncHandler(creativeNavigationC
 campaignRoutes.get("/campaigns/:id/duplicate", asyncHandler(duplicateCampaignController));
 campaignRoutes.post("/campaigns/:id/learning", asyncHandler(saveCampaignLearningController));
 campaignRoutes.post("/campaigns/:id/image-corrections", requireManager, asyncHandler(correctCampaignImageController));
+campaignRoutes.post("/campaigns/:id/restore-image-version", requireManager, asyncHandler(async(req,res)=>{
+  const id=z.coerce.number().int().positive().safeParse(req.params.id);
+  if(!id.success)throw new AppError("Anúncio inválido.",422);
+  await restoreAdVersion(id.data,req.body,req.user?.id??null);
+  res.json(await getCampaign(id.data));
+}));
 campaignRoutes.patch("/campaigns/:id/status", requireManager, asyncHandler(updateCampaignStatusController));
 campaignRoutes.post("/campaigns/:id/send-whatsapp", requireManager, asyncHandler(sendCampaignWhatsappController));
 campaignRoutes.get("/creatives", asyncHandler(listCreativesController));

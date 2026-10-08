@@ -87,6 +87,18 @@ export function SocialMedia({embedded=false}:{embedded?:boolean}) {
     } catch(e) {setError(e instanceof Error?e.message:"Não foi possível enviar as artes pelo WhatsApp.");}
     finally {setBusy(false);}
   }
+  async function restoreContent(item:Content,version:number) {
+    if(busy)throw new Error("Aguarde a operação atual terminar.");
+    setBusy(true);setError("");setSuccess("");
+    try {
+      await request(`/social-media/contents/${item.id}/restore-version`,{method:"POST",...json({version_index:version,revision_count:item.revisions?.length||0,base_image_urls:item.images.map(image=>image?.url||"")})});
+      setSelectedImages(current=>({...current,[String(item.id)]:[]}));
+      await refresh();
+      setSuccess("Versão restaurada, sem custo de IA. A versão substituída continua no histórico. Confira e aprove novamente.");
+      resolveError(error);
+    }catch(reason){const message=reason instanceof Error?reason.message:"Não foi possível restaurar. Atualize a tela para conferir a versão atual.";setError(message);throw new Error(message);}
+    finally{setBusy(false);}
+  }
   function edit(plan:Plan) {setView("plans");setPlanStep(0);setEditing(Number(plan.id));setForm({client_id:String(plan.client_id),name:plan.name,posts_per_week:plan.posts_per_week,pillars:plan.pillars.join("\n"),formats:plan.formats,weekly_image_limit:plan.weekly_image_limit,automatic:plan.automatic,active:plan.active});setVisual({...emptySelection,...plan.visual_selection});}
   if(new URLSearchParams(location.search).get("new")==="1")return <Navigate to="/criar?purpose=social" replace/>;
   return <>
@@ -134,7 +146,7 @@ export function SocialMedia({embedded=false}:{embedded?:boolean}) {
           <div className="flex flex-wrap items-end justify-between gap-3"><h2 className="text-lg font-semibold">Conteúdos para acompanhar</h2><label className="label m-0">Mostrar<select className="field" value={filter} onChange={e=>setFilter(e.target.value)}><option value="all">Todos os conteúdos</option><option value="review">Aguardando revisão</option><option value="failed">Com erro</option><option value="approved">Aprovados</option></select></label></div>
           {!calendar.contents.length&&<EmptyState>Seu plano está pronto. Use “Planejar semana” para pesquisar ideias e organizar as publicações.</EmptyState>}
           {calendar.contents.length>0&&!calendar.contents.some(item=>filter==="all"||item.status===filter)&&<EmptyState>Nenhum conteúdo nesta situação. Escolha outro filtro.</EmptyState>}
-          {calendar.contents.filter(item=>filter==="all"||item.status===filter).map(item=><SocialContentCard key={item.id} item={item} busy={busy} selected={selectedImages[String(item.id)]||[]} onSelect={indexes=>setSelectedImages(current=>({...current,[String(item.id)]:indexes}))} onError={setError} onSendWhatsapp={id=>void sendWhatsapp(id)} download={(url,filename)=>void downloadImage(url,filename).catch(e=>setError(e.message))} act={(action,note)=>perform(()=>request(`/social-media/contents/${item.id}/${action}`,{method:"POST",...json(action==="generate"?{}:{note:note||""})}))} editor={["draft","review","rejected"].includes(item.status)?<ContentEditor key={`${item.id}-${item.status}`} item={item} busy={busy} save={body=>perform(()=>request(`/social-media/contents/${item.id}`,{method:"PUT",...json(body)}))}/>:null}/>)}
+          {calendar.contents.filter(item=>filter==="all"||item.status===filter).map(item=><SocialContentCard key={item.id} item={item} busy={busy} selected={selectedImages[String(item.id)]||[]} onSelect={indexes=>setSelectedImages(current=>({...current,[String(item.id)]:indexes}))} onError={setError} onSendWhatsapp={id=>void sendWhatsapp(id)} onRestore={version=>restoreContent(item,version)} download={(url,filename)=>void downloadImage(url,filename).catch(e=>setError(e.message))} act={(action,note)=>perform(()=>request(`/social-media/contents/${item.id}/${action}`,{method:"POST",...json(action==="generate"?{}:{note:note||""})}))} editor={["draft","review","rejected"].includes(item.status)?<ContentEditor key={`${item.id}-${item.status}`} item={item} busy={busy} save={body=>perform(()=>request(`/social-media/contents/${item.id}`,{method:"PUT",...json(body)}))}/>:null}/>)}
           {selectedCount>0&&<section aria-label="Corrigir artes selecionadas" className="action-bar space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold">{selectedCount} arte{selectedCount>1?"s":""} selecionada{selectedCount>1?"s":""} para corrigir</h3><button type="button" className="btn-secondary" disabled={busy} onClick={()=>setSelectedImages({})}>Limpar seleção</button></div>
             <label className="label" htmlFor="social-correction-note">O que devemos corrigir?</label><textarea id="social-correction-note" className="field" rows={2} aria-invalid={correctionError} aria-describedby={correctionError?"social-correction-error":undefined} value={correctionNote} onChange={e=>{setCorrectionNote(e.target.value);setCorrectionError(false);}} placeholder="Ex.: manter a embalagem original e deixar o texto mais legível"/>
